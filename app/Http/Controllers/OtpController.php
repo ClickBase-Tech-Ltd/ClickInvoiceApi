@@ -22,7 +22,7 @@ class OtpController extends Controller
             ]);
 
             // Find the user
-            $user = User::where('email', $request->email)->first();
+           return $user = User::where('email', $request->email)->first();
 
             if (!$user) {
                 return response()->json([

@@ -1,3 +1,4 @@
+{{-- resources/views/emails/user-notification.blade.php --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,7 +10,7 @@
             margin: 0;
             padding: 0;
             background-color: #f8fafc;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
         }
         table {
             border-spacing: 0;
@@ -19,55 +20,52 @@
         }
         img {
             border: 0;
+            display: block;
         }
         .wrapper {
             width: 100%;
             table-layout: fixed;
             background-color: #f8fafc;
-            padding: 40px 0;
+            padding: 20px 0;
         }
         .main {
             width: 100%;
             max-width: 600px;
             margin: 0 auto;
             background-color: #ffffff;
-            border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.05);
         }
         .header {
             background-color: #0A66C2;
-            padding: 40px 20px;
+            padding: 25px 20px;
             text-align: center;
+            color: #ffffff;
+        }
+        .header img {
+            margin: 0 auto 10px;
+        }
+        .header .subject {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0;
         }
         .content {
-            padding: 40px 30px;
+            padding: 25px 30px;
             color: #334155;
             font-size: 16px;
             line-height: 1.6;
         }
-        .greeting {
-            font-size: 24px;
-            font-weight: 600;
-            color: #0A66C2;
-            margin: 0 0 20px;
-        }
-        .subject {
-            font-size: 28px;
-            color: #1e293b;
-            margin: 0 0 30px;
-            font-weight: 600;
-        }
         .message {
             background-color: #f0f9ff;
-            border-left: 4px solid #0A66C2;
-            padding: 24px;
-            border-radius: 8px;
-            margin: 20px 0;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 16px;
         }
         .btn-container {
             text-align: center;
-            margin: 40px 0;
+            margin: 20px 0;
         }
         .btn {
             display: inline-block;
@@ -77,46 +75,47 @@
             text-decoration: none;
             font-weight: 600;
             font-size: 16px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(10,102,194,0.25);
+            border-radius: 6px;
+            box-shadow: 0 3px 10px rgba(10,102,194,0.25);
         }
         .footer {
-            background-color: #1e293b;
-            color: #94a3b8;
-            padding: 40px 30px;
+            background-color: #0A66C2;
+            color: #ffffff;
+            padding: 20px 20px;
             text-align: center;
-            font-size: 14px;
-        }
-        .footer-logo {
-            margin-bottom: 20px;
+            font-size: 13px;
         }
         .tagline {
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 600;
-            color: #ffffff;
-            margin: 20px 0;
+            margin: 5px 0 10px;
         }
         .social {
-            margin: 25px 0;
+            margin: 10px 0;
         }
         .social a {
-            margin: 0 12px;
-            opacity: 0.8;
+            margin: 0 8px;
+            display: inline-block;
         }
-        .social a:hover {
-            opacity: 1;
+        .social img {
+            width: 28px;
+            height: 28px;
         }
         .links a {
-            color: #0A66C2;
+            color: #ffffff;
             text-decoration: none;
-            margin: 0 10px;
+            margin: 0 5px;
+            font-size: 12px;
         }
         @media screen and (max-width: 600px) {
             .content {
-                padding: 30px 20px;
+                padding: 20px 20px;
             }
             .header {
-                padding: 30px 20px;
+                padding: 20px 15px;
+            }
+            .footer {
+                padding: 15px 15px;
             }
         }
     </style>
@@ -128,51 +127,43 @@
             <tr>
                 <td class="header">
                     <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice" width="180" height="auto">
+                    <p class="subject">{{ $subjectLine ?? 'Notification' }}</p>
                 </td>
             </tr>
 
             <!-- Content -->
             <tr>
                 <td class="content">
-                    <h1 class="greeting">Hello {{ $user->firstName }},</h1>
-                    <h2 class="subject">{{ $subjectLine ?? 'Notification' }}</h2>
-
                     <div class="message">
                         {!! nl2br(e($messageBody)) !!}
                     </div>
 
-                    <!-- Optional CTA Button -->
-                    <!--
                     <div class="btn-container">
-                        <a href="#" class="btn">Take Action Now</a>
+                        <a href="https://app.clickinvoice.app/signin/" class="btn">Manage Your Business</a>
                     </div>
-                    -->
                 </td>
             </tr>
 
             <!-- Footer -->
             <tr>
                 <td class="footer">
-                    <div class="footer-logo">
-                        <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice" width="150" height="auto">
-                    </div>
-
-                    <p class="tagline">Simplifying Invoicing. Powering African Growth. 🚀</p>
+                    <p class="tagline">Smart Invoicing. Get Paid Faster.</p>
 
                     <div class="social">
-                        <!-- Replace with your links -->
-                        <a href="#"><img src="https://img.icons8.com/color/48/twitter.png" alt="Twitter" width="32" height="32"></a>
-                        <a href="#"><img src="https://img.icons8.com/color/48/linkedin.png" alt="LinkedIn" width="32" height="32"></a>
-                        <a href="#"><img src="https://img.icons8.com/color/48/facebook.png" alt="Facebook" width="32" height="32"></a>
+                        <a href="https://www.linkedin.com/company/110655244/" target="_blank">
+                            <img src="https://img.icons8.com/color/48/linkedin.png" alt="LinkedIn">
+                        </a>
+                        <a href="https://web.facebook.com/invoiceclick" target="_blank">
+                            <img src="https://img.icons8.com/color/48/facebook.png" alt="Facebook">
+                        </a>
                     </div>
+
+                    <p>
+                        <a href="https://clickinvoice.app" style="color:#ffffff; text-decoration:none;">clickinvoice.app</a> |
+                        <a href="mailto:info@clickinvoice.app" style="color:#ffffff; text-decoration:none;">info@clickinvoice.app</a>
+                    </p>
 
                     <p>© {{ date('Y') }} ClickInvoice. All rights reserved.</p>
-
-                    <div class="links">
-                        <a href="#">Unsubscribe</a> |
-                        <a href="#">Privacy Policy</a> |
-                        <a href="#">Contact Us</a>
-                    </div>
                 </td>
             </tr>
         </table>

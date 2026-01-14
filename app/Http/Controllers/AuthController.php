@@ -203,7 +203,7 @@ public function signin(Request $request)
 {
     try {
         $request->merge([
-        'currency' => (int) $request->input('currency', 0), // Converts "1" → 1, "abc" → 0
+        'currencyId' => (int) $request->input('currencyId', 0), // Converts "1" → 1, "abc" → 0
     ]);
         // Validate request data
         $validated = $request->validate([
