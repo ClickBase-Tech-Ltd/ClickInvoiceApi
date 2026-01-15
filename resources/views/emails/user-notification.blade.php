@@ -10,7 +10,7 @@
             margin: 0;
             padding: 0;
             background-color: #f8fafc;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-family: 'Roboto', 'Helvetica Neue', Arial, sans-serif;
         }
         table {
             border-spacing: 0;
@@ -38,7 +38,7 @@
         }
         .header {
             background-color: #0A66C2;
-            padding: 25px 20px;
+            padding: 25px 20px 15px 20px;
             text-align: center;
             color: #ffffff;
         }
@@ -47,8 +47,10 @@
         }
         .header .subject {
             font-size: 20px;
-            font-weight: 600;
+            font-weight: 500; /* Semi-bold, not too heavy */
             margin: 0;
+            padding: 0 15px; /* horizontal padding */
+            line-height: 1.4;
         }
         .content {
             padding: 25px 30px;
@@ -81,17 +83,17 @@
         .footer {
             background-color: #0A66C2;
             color: #ffffff;
-            padding: 20px 20px;
+            padding: 12px 20px;
             text-align: center;
             font-size: 13px;
         }
         .tagline {
             font-size: 14px;
             font-weight: 600;
-            margin: 5px 0 10px;
+            margin: 5px 0 8px;
         }
         .social {
-            margin: 10px 0;
+            margin: 8px 0;
         }
         .social a {
             margin: 0 8px;
@@ -112,10 +114,10 @@
                 padding: 20px 20px;
             }
             .header {
-                padding: 20px 15px;
+                padding: 20px 15px 12px 15px;
             }
             .footer {
-                padding: 15px 15px;
+                padding: 10px 15px;
             }
         }
     </style>
@@ -126,7 +128,7 @@
             <!-- Header -->
             <tr>
                 <td class="header">
-                    <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice" width="180" height="auto">
+                    <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice" width="150" height="auto">
                     <p class="subject">{{ $subjectLine ?? 'Notification' }}</p>
                 </td>
             </tr>
