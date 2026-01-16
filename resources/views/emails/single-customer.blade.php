@@ -1,39 +1,157 @@
 {{-- resources/views/emails/single-customer.blade.php --}}
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $subject }}</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; background: #f4f4f4; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .header { background: #0A66C2; color: white; padding: 30px; text-align: center; }
-        .header h1 { margin: 0; font-size: 24px; }
-        .content { padding: 30px; color: #333; }
-        .content p { margin: 0 0 16px; }
-        .footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #666; }
-        .btn { display: inline-block; padding: 12px 24px; background: #1e40af; color: white; text-decoration: none; border-radius: 6px; margin: 16px 0; }
+
+    <style type="text/css">
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f6f9fc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                         Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #1f2937;
+        }
+
+        table {
+            border-spacing: 0;
+            width: 100%;
+        }
+
+        img {
+            border: 0;
+            display: block;
+        }
+
+        .wrapper {
+            width: 100%;
+            background-color: #f6f9fc;
+        }
+
+        .main {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 6px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            padding: 24px 24px 16px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        /* Content */
+        .content {
+            padding: 28px 32px;
+            font-size: 15px;
+            line-height: 1.65;
+            color: #374151;
+        }
+
+        .content p {
+            margin: 0 0 16px;
+        }
+
+        .sender {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 16px 24px;
+            border-top: 1px solid #e5e7eb;
+            text-align: center;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .footer a {
+            color: #6b7280;
+            text-decoration: none;
+        }
+
+        .footer p {
+            margin: 4px 0;
+        }
+
+        @media screen and (max-width: 600px) {
+            .content {
+                padding: 24px 20px;
+            }
+
+            .header {
+                padding: 20px 16px 14px;
+            }
+
+            .footer {
+                padding: 14px 16px;
+            }
+        }
     </style>
 </head>
+
 <body>
-    <div class="container">
-    <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice Logo" style="max-width: 150px; display: block; margin: 0 auto 10px;">
-        <div class="header">
-            <h1>Message from {{ $tenantName}} - ({{ $tenantEmail}})</h1>
-        </div>
-        <div class="content">
-            <p>Dear {{ $customerName }},</p>
+<center class="wrapper">
+    <table class="main">
 
-            {!! nl2br(e($emailMessage)) !!}
+        <!-- Header -->
+        <tr>
+            <td class="header" align="center" style="text-align: center;">
+                <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                    <tr>
+                        <td align="center">
+                            <img
+                                src="https://app.clickinvoice.app/images/logo/logo.png"
+                                alt="ClickInvoice"
+                                width="140"
+                                style="margin: 0 auto; display: block;"
+                            >
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
 
-            <p>
-                Best regards,<br>
-                <strong>{{ $tenantName}}</strong>
-            </p>
-        </div>
-        <div class="footer">
-            <p>This is an automated message from {{ config('app.name') }}. Please do not reply directly.</p>
-        </div>
-    </div>
+        <!-- Content -->
+        <tr>
+            <td class="content">
+                <div class="sender">
+                    Message from <strong>{{ $tenantName }}</strong>
+                    ({{ $tenantEmail }})
+                </div>
+
+                <p>Dear {{ $customerName }},</p>
+
+                {!! nl2br(e($emailMessage)) !!}
+
+                <p>
+                    Best regards,<br>
+                    <strong>{{ $tenantName }}</strong>
+                </p>
+            </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+            <td class="footer">
+                <p>
+                    <a href="https://clickinvoice.app">clickinvoice.app</a> ·
+                    <a href="mailto:info@clickinvoice.app">info@clickinvoice.app</a>
+                </p>
+                <p>© {{ date('Y') }} ClickInvoice</p>
+                <p>This is an automated message. Please do not reply.</p>
+            </td>
+        </tr>
+
+    </table>
+</center>
 </body>
 </html>

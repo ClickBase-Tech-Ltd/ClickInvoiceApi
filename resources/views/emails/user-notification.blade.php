@@ -121,7 +121,7 @@
         <tr>
             <td class="header">
                 <img
-                    src="https://app.clickinvoice.app/images/logo/logo.svg"
+                    src="https://app.clickinvoice.app/images/logo/logo.png"
                     alt="ClickInvoice"
                     width="140"
                 >
