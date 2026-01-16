@@ -130,7 +130,7 @@
 
         <!-- Content -->
         <tr>
-            <td class="content">
+            <td class="content" style="padding-left:32px; padding-right:32px;">
                 <div class="message">
                     {!! nl2br(e($messageBody)) !!}
                 </div>
