@@ -171,7 +171,7 @@ public function update(Request $request, $tenantId)
          'tenantLogo' => 'sometimes|file|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
 'authorizedSignature' => 'sometimes|file|image|mimes:png,jpg,jpeg,svg|max:2048',
 'timezone' => 'required|string|max:100',
-        'currency' => 'required|exists:currencies,currencyId',
+        // 'currency' => 'required|exists:currencies,currencyId',
         'gatewayPreference' => 'required|exists:payment_gateways,gatewayId',
         'status' => 'sometimes|in:active,inactive',
     ]);
