@@ -50,67 +50,278 @@ class AuthController extends Controller
     }
 
 
+// public function signin(Request $request)
+// {
+//     $request->validate([
+//         'username' => 'required',
+//         'password' => 'required',
+//     ]);
+
+//     // Find user by email or phone number with staff and role relationships
+//     $user = User::with(['user_role'])
+//         ->where('email', $request->username)
+//         ->orWhere('phoneNumber', $request->username)
+//         ->first();
+
+//     if (!$user) {
+//         throw ValidationException::withMessages([
+//             'username' => ['No account found with this email or phone number.'],
+//         ]);
+//     }
+
+//     // Attempt JWT authentication
+//     $credentials = [
+//         'email' => $user->email,
+//         'password' => $request->password,
+//     ];
+
+//     if (!$accessToken = auth('api')->attempt($credentials)) {
+//         return response()->json(['error' => 'Invalid credentials'], 401);
+//     }
+
+//     // Generate refresh token
+//     $refreshToken = Str::random(64);
+//     $user = auth('api')->user()->load(['user_role']); // Reload relationships
+
+//     // Store refresh token in database
+//     RefreshToken::create([
+//         'user_id' => $user->id,
+//         'token' => $refreshToken,
+//         'expires_at' => Carbon::now()->addDays(14),
+//     ]);
+
+//     // Hide sensitive data
+//     $user->makeHidden(['password']);
+
+//     // Return response with cookies
+//     return response()->json([
+//         'message' => 'Logged in',
+//         'firstName' => $user->firstName ?? '',
+//         'lastName' => $user->lastName ?? '',
+//         'email' => $user->email ?? '',
+//         'phoneNumber' => $user->phoneNumber ?? '',
+//         'role' => $user->user_role->roleName ?? '',
+//         'tenantId' => $user->currently_active_tenant->tenantId ?? '',
+//         'profileImage' => $user->profileImage ?? '/avatar.png',
+//         'coverImage' => $user->coverImage ?? '/cover_photo.jpg',
+
+//         // 'id' => $user->id ?? '',
+//         // 'access_token' => $accessToken,
+//     ])
+//         ->cookie('access_token', $accessToken, 60, null, null, true, true, false, 'strict')
+//         ->cookie('refresh_token', $refreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');
+// }
+
+
+// public function signin(Request $request)
+// {
+//     $request->validate([
+//         'username' => 'required',
+//         'password' => 'nullable', // 👈 allow empty password
+//     ]);
+
+//     $user = User::with(['user_role'])
+//         ->where('email', $request->username)
+//         ->orWhere('phoneNumber', $request->username)
+//         ->first();
+
+//     if (!$user) {
+//         return response()->json([
+//             'status' => false,
+//             'code' => 'USER_NOT_FOUND',
+//             'message' => 'No account found',
+//         ], 404);
+//     }
+
+//     /**
+//      * 🟡 STATE 1: Email not verified
+//      */
+//     if ($user->status === 'pending') {
+//         return response()->json([
+//             'status' => false,
+//             'requiresEmailVerification' => true,
+//             'email' => $user->email,
+//             'message' => 'Email not verified',
+//         ], 403);
+//     }
+
+//     /**
+//      * 🟡 STATE 2: Email verified but no password yet
+//      */
+//     if (is_null($user->password)) {
+//         return response()->json([
+//             'status' => false,
+//             'requiresPasswordSetup' => true,
+//             'email' => $user->email,
+//             'message' => 'Password not set',
+//         ], 403);
+//     }
+
+//     /**
+//      * 🟢 STATE 3: Fully active user
+//      */
+//     if (!$request->password) {
+//         return response()->json([
+//             'status' => false,
+//             'requiresPassword' => true,
+//             'message' => 'Password required',
+//         ], 422);
+//     }
+
+//     // Attempt login
+//     if (!$accessToken = auth('api')->attempt([
+//         'email' => $user->email,
+//         'password' => $request->password,
+//     ])) {
+//         return response()->json([
+//             'status' => false,
+//             'message' => 'Invalid credentials',
+//         ], 401);
+//     }
+
+//         // Generate refresh token
+//     $refreshToken = Str::random(64);
+//     $user = auth('api')->user()->load(['user_role']); // Reload relationships
+
+//     // Store refresh token in database
+//     RefreshToken::create([
+//         'user_id' => $user->id,
+//         'token' => $refreshToken,
+//         'expires_at' => Carbon::now()->addDays(14),
+//     ]);
+
+//     $user->makeHidden(['password']);
+
+//        return response()->json([
+//         'status' => true,
+//         'message' => 'Logged in',
+//         'firstName' => $user->firstName ?? '',
+//         'lastName' => $user->lastName ?? '',
+//         'email' => $user->email ?? '',
+//         'phoneNumber' => $user->phoneNumber ?? '',
+//         'role' => $user->user_role->roleName ?? '',
+//         'tenantId' => $user->currently_active_tenant->tenantId ?? '',
+//         'profileImage' => $user->profileImage ?? '/avatar.png',
+//         'coverImage' => $user->coverImage ?? '/cover_photo.jpg',
+
+//         // 'id' => $user->id ?? '',
+//         // 'access_token' => $accessToken,
+//     ])
+//         ->cookie('access_token', $accessToken, 60, null, null, true, true, false, 'strict')
+//         ->cookie('refresh_token', $refreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');
+// }
+
+
 public function signin(Request $request)
 {
     $request->validate([
         'username' => 'required',
-        'password' => 'required',
+        'password' => 'nullable', // Allow empty password
     ]);
 
-    // Find user by email or phone number with staff and role relationships
     $user = User::with(['user_role'])
         ->where('email', $request->username)
         ->orWhere('phoneNumber', $request->username)
         ->first();
 
     if (!$user) {
-        throw ValidationException::withMessages([
-            'username' => ['No account found with this email or phone number.'],
-        ]);
+        return response()->json([
+            'status'  => false,
+            'code'    => 'USER_NOT_FOUND',
+            'message' => 'No account found',
+        ], 404);
     }
 
-    // Attempt JWT authentication
-    $credentials = [
-        'email' => $user->email,
-        'password' => $request->password,
-    ];
+    // ── STATE 1: Email not verified (pending) ──
+    if ($user->status === 'pending') {
+        // Generate a new OTP (adjust logic to match how you generate OTPs elsewhere)
+        $otp = rand(100000, 999999); // ← Replace with your secure OTP generator
 
-    if (!$accessToken = auth('api')->attempt($credentials)) {
-        return response()->json(['error' => 'Invalid credentials'], 401);
+        // Save OTP (assuming you have otp & otp_expires_at columns)
+        $user->otp_code = $otp;
+        $user->otp_expires_at = now()->addMinutes(10);
+        $user->save();
+
+        // Send OTP email
+        try {
+            Mail::to($user->email)->send(new OtpEmail(
+                $user->firstName,
+                $user->lastName,
+                $otp
+            ));
+            Log::info('OTP email sent successfully to ' . $user->email);
+        } catch (\Exception $e) {
+            Log::error('OTP email sending failed: ' . $e->getMessage());
+            // Still proceed — don't fail login attempt due to email issue
+        }
+
+        return response()->json([
+            'status'                  => false,
+            'requiresEmailVerification' => true,
+            'email'                   => $user->email,
+            'message'                 => 'Email not verified. A new OTP has been sent.',
+        ], 403);
+    }
+
+    // ── STATE 2: Email verified but no password yet ──
+    if (is_null($user->password)) {
+        return response()->json([
+            'status'               => false,
+            'requiresPasswordSetup' => true,
+            'email'                => $user->email,
+            'message'              => 'Password not set. Please complete setup.',
+        ], 403);
+    }
+
+    // ── STATE 3: Fully active user ──
+    if (!$request->password) {
+        return response()->json([
+            'status'          => false,
+            'requiresPassword' => true,
+            'message'         => 'Password required',
+        ], 422);
+    }
+
+    // Attempt standard password login
+    if (!$accessToken = auth('api')->attempt([
+        'email'    => $user->email,
+        'password' => $request->password,
+    ])) {
+        return response()->json([
+            'status'  => false,
+            'message' => 'Invalid credentials',
+        ], 401);
     }
 
     // Generate refresh token
     $refreshToken = Str::random(64);
-    $user = auth('api')->user()->load(['user_role']); // Reload relationships
+    $user = auth('api')->user()->load(['user_role']); // Reload with relations
 
-    // Store refresh token in database
+    // Store refresh token
     RefreshToken::create([
-        'user_id' => $user->id,
-        'token' => $refreshToken,
+        'user_id'    => $user->id,
+        'token'      => $refreshToken,
         'expires_at' => Carbon::now()->addDays(14),
     ]);
 
-    // Hide sensitive data
     $user->makeHidden(['password']);
 
-    // Return response with cookies
     return response()->json([
-        'message' => 'Logged in',
-        'firstName' => $user->firstName ?? '',
-        'lastName' => $user->lastName ?? '',
-        'email' => $user->email ?? '',
+        'status'      => true,
+        'message'     => 'Logged in',
+        'firstName'   => $user->firstName ?? '',
+        'lastName'    => $user->lastName ?? '',
+        'email'       => $user->email ?? '',
         'phoneNumber' => $user->phoneNumber ?? '',
-        'role' => $user->user_role->roleName ?? '',
-        'tenantId' => $user->currently_active_tenant->tenantId ?? '',
-        'profileImage' => $user->profileImage ?? '/avatar.png',
-        'coverImage' => $user->coverImage ?? '/cover_photo.jpg',
-
-        // 'id' => $user->id ?? '',
-        // 'access_token' => $accessToken,
+        'role'        => $user->user_role->roleName ?? '',
+        'tenantId'    => $user->currently_active_tenant->tenantId ?? '',
+        'profileImage'=> $user->profileImage ?? '/avatar.png',
+        'coverImage'  => $user->coverImage ?? '/cover_photo.jpg',
     ])
-        ->cookie('access_token', $accessToken, 60, null, null, true, true, false, 'strict')
-        ->cookie('refresh_token', $refreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');
+    ->cookie('access_token', $accessToken, 60, null, null, true, true, false, 'strict')
+    ->cookie('refresh_token', $refreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');
 }
+
 
     public function refresh(Request $request)
     {

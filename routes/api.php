@@ -72,6 +72,7 @@ Route::post('/setup-password', [AuthController::class, 'setupPassword']);
 
 Route::post('/signup', [AuthController::class, 'signup2']);
 Route::post('/signin', [AuthController::class, 'signin']);
+Route::post('/signin-check', [AuthController::class, 'signin']);
 Route::post('/logout', [AuthController::class, 'logout']);
 Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::get('/users/profile', [AuthController::class, 'profile'])->middleware('auth.jwt');

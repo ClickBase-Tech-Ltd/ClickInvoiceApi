@@ -22,7 +22,7 @@ class OtpController extends Controller
             ]);
 
             // Find the user
-           return $user = User::where('email', $request->email)->first();
+            $user = User::where('email', $request->email)->first();
 
             if (!$user) {
                 return response()->json([
@@ -79,7 +79,7 @@ class OtpController extends Controller
 
         Mail::send('emails.otp', $data, function($message) use ($email) {
             $message->to($email)
-                    ->subject('Your iDriva Verification Code');
+                    ->subject('Your ClickInvoice Verification Code');
         });
     }
 
