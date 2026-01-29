@@ -5,7 +5,11 @@
 </head>
 <body>
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <img src="https://app.clickinvoice.app/images/logo/logo-dark.svg" alt="Company Logo" style="max-width: 150px; display: block; margin: 0 auto 10px;">
+    <img
+                    src="https://app.clickinvoice.app/images/logo/logo.png"
+                    alt="ClickInvoice"
+                    width="140"
+                >
 
         <h2 style="color: #0A66C2;">ClickInvoice - Email Verification</h2>
 
@@ -28,5 +32,14 @@
             The ClickInvoice Team
         </p>
     </div>
+      <tr>
+            <td class="footer">
+                <p>
+                    <a href="https://clickinvoice.app">clickinvoice.app</a> ·
+                    <a href="mailto:info@clickinvoice.app">info@clickinvoice.app</a>
+                </p>
+                <p>© {{ date('Y') }} ClickInvoice Ltd.</p>
+            </td>
+        </tr>
 </body>
 </html>
