@@ -20,11 +20,7 @@
 </head>
 <body>
     <div class="container">
-        <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="ClickInvoice Logo" style="max-width: 150px; display: block; margin: 0 auto 10px;">
-        <!-- <div class="header">
-            <h1>iDriva</h1>
-            <p>Professional Driver Network</p>
-        </div> -->
+       <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="Company Logo" style="max-width: 150px; display: block; margin: 0 auto 10px;">
 
         <div class="content">
             <h2>Hello {{ $firstName }} {{ $lastName }},</h2>
