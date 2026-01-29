@@ -42,10 +42,15 @@
             <p>If you didn't create an account with ClickInvoice, please ignore this email.</p>
         </div>
 
-        <div class="footer">
-            <p>&copy; {{ date('Y') }} ClickInvoice. A product ClickBase Technologies Limited. All rights reserved.</p>
-            {{-- <p>Powered by ClickBase Technologies Ltd.</p> --}}
-        </div>
+        <tr>
+            <td class="footer">
+                <p>
+                    <a href="https://clickinvoice.app">clickinvoice.app</a> ·
+                    <a href="mailto:info@clickinvoice.app">info@clickinvoice.app</a>
+                </p>
+                <p>© {{ date('Y') }} ClickInvoice Ltd.</p>
+            </td>
+        </tr>
     </div>
 </body>
 </html>
