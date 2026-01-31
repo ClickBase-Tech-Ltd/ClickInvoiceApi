@@ -20,6 +20,19 @@ class SubscriptionController extends Controller
         ]);
     }
 
+    public function mySubscriptions(Request $request)
+    {
+        $user = auth()->user();
+
+        $subscriptions = Subscription::with('user', 'plan.currency_detail')
+            ->where('userId', $user->id)
+            ->get();
+
+        return response()->json([
+            'subscriptions' => $subscriptions,
+        ]);
+    }
+
     public function create(Request $request, $planId)
     {
         $user = auth()->user(); // Or however you get authenticated user
@@ -45,6 +58,7 @@ class SubscriptionController extends Controller
 
         $txRef = 'sub-' . $subscription->subscriptionId . '-' . time();
 
+      
         // Initiate payment on Flutterwave
         // Hardcode for testing; remove in production
 $ngrokUrl = 'https://otiosely-chronological-cari.ngrok-free.dev'; // Your ngrok URL
@@ -73,6 +87,15 @@ $ngrokUrl = 'https://otiosely-chronological-cari.ngrok-free.dev'; // Your ngrok 
             ]);
 
         if ($response->successful()) {
+              $payment = Payment::create([
+            'subscriptionId' => $subscription->subscriptionId,
+            'amount' => $plan->price,
+            'currency' => $plan->currency_detail->currencyCode,
+            'status' => 'pending',
+            'flutterwaveTxRef' => $txRef,
+            'flutterwaveTxId' =>  $response->json()['data']['id'],
+            'userId' => $user->id,
+        ]);
             $link = $response->json()['data']['link'];
             return response()->json(['payment_link' => $link]);
         } else {
@@ -123,7 +146,7 @@ public function verifyRedirect(Request $request)
     public function cancel(Request $request)
 {
     $user = auth()->user();
-    $sub = $user->subscription;
+   return $sub = $user->subscription;
 
     if (!$sub || $sub->status !== 'active') {
         return response()->json(['error' => 'No active subscription'], 400);

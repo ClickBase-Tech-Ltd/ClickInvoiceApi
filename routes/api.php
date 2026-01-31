@@ -282,6 +282,7 @@ Route::get('/plans', function () {
     // });
 
     Route::get('/subscribers', [SubscriptionController::class, 'index']);
+    Route::get('/my-subscriptions', [SubscriptionController::class, 'mySubscriptions']);
 
     // Support Routes
     Route::get('/support/tickets', [SupportController::class, 'index']);
@@ -292,6 +293,8 @@ Route::get('/plans', function () {
     Route::patch('/support/tickets/{ticketId}/status', [SupportController::class, 'updateTicketStatus']);
 
     Route::post('/subscribe/{planId}', [SubscriptionController::class, 'create']); // Add auth
+     Route::put('/subscriptions/{planId}/cancel', [SubscriptionController::class, 'cancel']); // Add auth
+
 
     Route::get('/users/{id}/profile', [UsersController::class, 'profile']);
 

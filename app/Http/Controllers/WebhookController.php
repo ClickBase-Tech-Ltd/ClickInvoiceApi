@@ -29,7 +29,10 @@ class WebhookController extends Controller
 
         if ($event === 'charge.completed' && $data['status'] === 'successful') {
     // Correct way to get your custom meta
-    $subscriptionId = $data['meta_data']['subscriptionId'] ?? null;
+    // $subscriptionId = $data['meta_data']['subscriptionId'] ?? null;
+    $meta = $request->input('meta_data', []);
+$subscriptionId = $meta['subscriptionId'] ?? null;
+
 
     // Also fallback to tx_ref pattern (more reliable if meta missing)
     if (!$subscriptionId) {
@@ -63,7 +66,7 @@ class WebhookController extends Controller
             'amount' => $data['charged_amount'] ?? $data['amount'],
             'currency' => $data['currency'],
             'status' => 'successful',
-            'paidAt' => now(),
+            // 'paidAt' => now(),
             'responseData' => json_encode($data),
         ]);
 
