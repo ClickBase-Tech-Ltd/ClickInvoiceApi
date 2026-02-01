@@ -58,9 +58,7 @@ class SyncSubscriptions extends Command
     // 2️⃣ Fetch subscription(s) from Flutterwave using the subscription ID
     $response = Http::withHeaders([
             'Authorization' => "Bearer $secretKey"
-        ])->get("https://api.flutterwave.com/v3/subscriptions", [
-            'transaction_id' => $subscription->flutterwaveSubscriptionId
-        ]);
+        ])->get("https://api.flutterwave.com/v3/subscriptions?transaction_id={$subscription->flutterwaveSubscriptionId}");
 
     // 3️⃣ Log raw response for debugging
     Log::info('Flutterwave response', ['raw' => $response->body()]);
