@@ -55,7 +55,7 @@ class SyncSubscriptions extends Command
     $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
         ->get("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}");
     
-    Log::channel('daily')->info($response);
+    Log::info($response);
     if (!$response->successful()) {
         $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
          Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
