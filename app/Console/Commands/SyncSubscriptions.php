@@ -48,8 +48,8 @@ class SyncSubscriptions extends Command
    private function syncWithFlutterwave(Subscription $subscription)
 {
     // 1️⃣ Check if Flutterwave subscription ID exists
-    if (!$subscription->flutterwave_subscription_id) {
-        Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->id}");
+    if (!$subscription->flutterwaveSubscriptionId) {
+        Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->subscriptionId}");
         return;
     }
 
@@ -59,15 +59,15 @@ class SyncSubscriptions extends Command
     $response = Http::withHeaders([
             'Authorization' => "Bearer $secretKey"
         ])->get("https://api.flutterwave.com/v3/subscriptions", [
-            'transaction_id' => $subscription->flutterwave_subscription_id
+            'transaction_id' => $subscription->flutterwaveSubscriptionId
         ]);
 
     // 3️⃣ Log raw response for debugging
     Log::info('Flutterwave response', ['raw' => $response->body()]);
 
     if (!$response->successful()) {
-        $this->error("Failed Flutterwave sync for subscription {$subscription->id}");
-        Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->id}", [
+        $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
+        Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}", [
             'status' => $response->status(),
             'body' => $response->body(),
         ]);
@@ -94,7 +94,7 @@ class SyncSubscriptions extends Command
             $subscription->status = 'cancelled';
             $subscription->save();
 
-            $this->info("Subscription {$subscription->id} cancelled via Flutterwave");
+            $this->info("Subscription {$subscription->subscriptionId} cancelled via Flutterwave");
             return; // no need to continue after local update
         }
 
@@ -102,11 +102,11 @@ class SyncSubscriptions extends Command
         if (
             $subscription->status === 'expired' &&
             $flutterwaveStatus === 'active' &&
-            $subscription->flutterwave_cancelled_at === null
+            $subscription->flutterwaveCancelledAt === null
         ) {
             $this->cancelOnFlutterwave($subscription);
 
-            $this->info("Cancelled Flutterwave subscription for {$subscription->id}");
+            $this->info("Cancelled Flutterwave subscription for {$subscription->subscriptionId}");
         }
     }
 }
