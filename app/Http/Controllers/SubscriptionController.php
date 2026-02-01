@@ -94,7 +94,7 @@ $ngrokUrl = 'https://otiosely-chronological-cari.ngrok-free.dev'; // Your ngrok 
             'currency' => $plan->currency_detail->currencyCode,
             'status' => 'pending',
             'flutterwaveTxRef' => $txRef,
-            'flutterwaveTxId' =>  $response->json()['data']['id'],
+            // 'flutterwaveTxId' =>  $response->json()['data']['id'],
             'userId' => $user->id,
         ]);
             $link = $response->json()['data']['link'];
