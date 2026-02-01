@@ -76,7 +76,7 @@ class SyncSubscriptions extends Command
 
     // 4️⃣ Get the list of subscriptions from response
     $subscriptions = $response->json('data', []); // defaults to empty array if 'data' is missing
-
+    Log::info($subscription);
     // 5️⃣ Loop through Flutterwave subscriptions (usually only one, but API returns an array)
     foreach ($subscriptions as $fwSub) {
         $flutterwaveStatus = $fwSub['status'] ?? null; // active | cancelled | completed
