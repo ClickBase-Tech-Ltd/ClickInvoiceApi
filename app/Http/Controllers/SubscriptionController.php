@@ -5,6 +5,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use App\Models\Plans;
 use App\Models\Subscription;
+use App\Models\Payment;
 use App\Models\User; // Assuming auth
 
 class SubscriptionController extends Controller
