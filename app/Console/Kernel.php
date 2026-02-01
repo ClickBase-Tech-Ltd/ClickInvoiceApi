@@ -14,6 +14,8 @@ class Kernel extends ConsoleKernel
     {
         // $schedule->command('inspire')->hourly();
         $schedule->command('tickets:close-inactive')->hourly();
+        $schedule->command('subscriptions:sync')->hourly();
+        $schedule->command('subscriptions:sync')->dailyAt('01:00');
     }
 
     /**

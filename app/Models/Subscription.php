@@ -37,6 +37,7 @@ class Subscription extends Model
         'nextBillingDate'  => 'datetime',
         'endDate'          => 'datetime',
         'metadata'         => 'array',
+        'flutterwaveCancelledAt' => 'datetime',
     ];
 
     /*

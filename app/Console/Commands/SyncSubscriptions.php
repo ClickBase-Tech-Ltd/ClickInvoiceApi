@@ -1,0 +1,108 @@
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use App\Models\Subscription;
+use Illuminate\Support\Facades\Http;
+use Carbon\Carbon;
+
+class SyncSubscriptions extends Command
+{
+    protected $signature = 'subscriptions:sync';
+    protected $description = 'Daily sync and expiry check for subscriptions';
+
+    public function handle()
+    {
+        $now = Carbon::now();
+
+        // 1️⃣ Expire local subscriptions that have passed end date
+        $expired = Subscription::where('status', 'active')
+            ->where('endDate', '<', $now)
+            ->get();
+
+        foreach ($expired as $subscription) {
+            $subscription->status = 'expired';
+            $subscription->save();
+
+            // $this->info("Expired subscription ID: {$subscription->subscriptionId}");
+            Log::channel('daily')->info("Expired subscription ID: {$subscription->subscriptionId}");
+    
+        }
+
+        // 2️⃣ (Optional but recommended) Reconcile with Flutterwave
+        $activeSubs = Subscription::whereIn('status', ['active', 'expired'])
+            ->whereNotNull('flutterwaveSubscriptionId')
+            ->get();
+
+        foreach ($activeSubs as $subscription) {
+            $this->syncWithFlutterwave($subscription);
+        }
+
+        // $this->info('Subscription sync completed.');
+        Log::channel('daily')->info("Subscription sync completed.");
+
+    }
+
+   private function syncWithFlutterwave(Subscription $subscription)
+{
+    if (!$subscription->flutterwaveSubscriptionId) {
+         Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->subscriptionId}");
+        return;
+    }
+    $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+    $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
+        ->get("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}");
+
+    if (!$response->successful()) {
+        $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
+         Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
+        return;
+    }
+
+    $data = $response->json('data');
+    $flutterwaveStatus = $data['status']; // active | cancelled | completed
+
+    // 1️⃣ Flutterwave cancelled/completed → update locally
+    if (in_array($flutterwaveStatus, ['cancelled', 'completed'])
+        && $subscription->status !== 'cancelled') {
+
+        $subscription->status = 'cancelled';
+        $subscription->save();
+
+        $this->info("Subscription {$subscription->subscriptionId} cancelled via Flutterwave");
+        return;
+    }
+
+    // 2️⃣ Local expiry → cancel on Flutterwave (once)
+    if (
+        $subscription->status === 'expired' &&
+        $flutterwaveStatus === 'active' &&
+        $subscription->flutterwaveCancelledAt === null
+    ) {
+        $this->cancelOnFlutterwave($subscription);
+
+        $this->info("Cancelled Flutterwave subscription for {$subscription->subscriptionId}");
+    }
+}
+
+
+
+private function cancelOnFlutterwave(Subscription $subscription)
+{
+      if ($subscription->flutterwaveCancelledAt !== null) {
+        return;
+    }
+    if (!$subscription->flutterwaveSubscriptionId) {
+        return;
+    }
+
+    Http::withHeaders(['Authorization' => "Bearer " . env('FLUTTERWAVE_SECRET_KEY')])
+        ->post("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
+
+        $subscription->flutterwaveCancelledAt = now();
+        $subscription->save();
+}
+
+
+}
