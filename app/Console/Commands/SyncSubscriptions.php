@@ -67,7 +67,7 @@ class SyncSubscriptions extends Command
 
     if (!$response->successful()) {
         $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
-        Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}", [
+        Log::error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}", [
             'status' => $response->status(),
             'body' => $response->body(),
         ]);
@@ -76,7 +76,7 @@ class SyncSubscriptions extends Command
 
     // 4️⃣ Get the list of subscriptions from response
     $subscriptions = $response->json('data', []); // defaults to empty array if 'data' is missing
-    Log::info($subscription);
+    Log::info('Flutterwave subscriptions data', ['subscription' => $subscription, 'data' => $subscriptions]);
     // 5️⃣ Loop through Flutterwave subscriptions (usually only one, but API returns an array)
     foreach ($subscriptions as $fwSub) {
         $flutterwaveStatus = $fwSub['status'] ?? null; // active | cancelled | completed
