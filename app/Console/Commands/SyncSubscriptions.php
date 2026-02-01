@@ -56,10 +56,12 @@ class SyncSubscriptions extends Command
     Log::info("FlutterwaveSubscriptionId: {$subscription->flutterwaveSubscriptionId}");
     $secretKey = env('FLUTTERWAVE_SECRET_KEY');
 
+    $getUserEmail = $subscription->user ? $subscription->user->email : 'unknown';
+    Log::info("Fetching Flutterwave subscription for user: {$getUserEmail}");
     // 2️⃣ Fetch subscription(s) from Flutterwave using the subscription ID
     $response = Http::withHeaders([
             'Authorization' => "Bearer $secretKey"
-        ])->get("https://api.flutterwave.com/v3/subscriptions?transaction_id={$subscription->flutterwaveSubscriptionId}");
+        ])->get("https://api.flutterwave.com/v3/subscriptions?email={$getUserEmail}");
 
     // 3️⃣ Log raw response for debugging
     Log::info('Flutterwave response', ['raw' => $response->body()]);
