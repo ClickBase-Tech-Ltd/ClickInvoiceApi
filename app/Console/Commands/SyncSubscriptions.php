@@ -53,7 +53,7 @@ class SyncSubscriptions extends Command
         return;
     }
 
-    Log::info("FlutterwaveSubscriptionId", $subscription->flutterwaveSubscriptionId);
+    Log::info("FlutterwaveSubscriptionId: {$subscription->flutterwaveSubscriptionId}");
     $secretKey = env('FLUTTERWAVE_SECRET_KEY');
 
     // 2️⃣ Fetch subscription(s) from Flutterwave using the subscription ID
