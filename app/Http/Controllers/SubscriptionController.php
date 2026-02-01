@@ -7,6 +7,8 @@ use App\Models\Plans;
 use App\Models\Subscription;
 use App\Models\Payment;
 use App\Models\User; // Assuming auth
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class SubscriptionController extends Controller
 {
@@ -165,4 +167,102 @@ public function verifyRedirect(Request $request)
         return response()->json(['error' => 'Failed to cancel'], 500);
     }
 }
+
+public function activate(Request $request, $subscriptionId)
+    {
+        $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
+
+        // Optional validation
+        $request->validate([
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        // Check if already active
+        if ($subscription->status === 'active') {
+            return response()->json(['message' => 'Subscription is already active'], 400);
+        }
+
+        // Activate
+        $now = Carbon::now();
+        $subscription->status = 'active';
+        $subscription->startDate = $now;
+        $subscription->nextBillingDate = $now->addMonth(); // Assuming monthly billing; adjust if different interval
+        $subscription->endDate = null; // Clear end date if any
+        $subscription->metadata = array_merge($subscription->metadata ?? [], [
+            'manual_activation' => true,
+            'activation_reason' => $request->reason,
+            'activated_at' => $now->toDateTimeString(),
+        ]);
+        $subscription->save();
+
+        // Optional: Update user's current_plan
+        $subscription->user->update(['currentPlan' => $subscription->planId]);
+
+        // If Flutterwave integration needed, but since manual, perhaps skip or simulate
+
+        Log::info("Subscription {$subscription->subscriptionId} manually activated", ['user_id' => $subscription->userId]);
+        return response()->json([
+            'message' => 'Subscription activated successfully',
+            'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+        ]);
+    }
+
+    // PATCH /subscriptions/{id}/deactivate
+    public function deactivate(Request $request, $subscriptionId)
+    {
+        $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
+
+        // Optional validation
+        $request->validate([
+            'reason' => 'nullable|string|max:255',
+            'immediate' => 'boolean',
+        ]);
+
+        // Check if not active
+        if ($subscription->status !== 'active') {
+            return response()->json(['message' => 'Subscription is not active'], 400);
+        }
+
+        $now = Carbon::now();
+
+        // If Flutterwave ID exists, cancel via API
+        if ($subscription->flutterwaveSubscriptionId) {
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . env('FLUTTERWAVE_SECRET_KEY'),
+                ])->patch("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
+
+                if ($response->failed()) {
+                    Log::error('Flutterwave cancellation failed', ['response' => $response->json()]);
+                    return response()->json(['message' => 'Failed to cancel via Flutterwave'], 500);
+                }
+
+                $subscription->flutterwave_cancelled_at = $now;
+            } catch (\Exception $e) {
+                Log::error('Flutterwave API error', ['error' => $e->getMessage()]);
+                // Continue with local deactivation even if API fails, or abort based on policy
+            }
+        }
+
+        // Deactivate
+        $subscription->status = 'cancelled'; // Or 'expired' based on your schema
+        $subscription->endDate = $request->immediate ? $now : $subscription->nextBillingDate;
+        $subscription->metadata = array_merge($subscription->metadata ?? [], [
+            'manual_deactivation' => true,
+            'deactivation_reason' => $request->reason,
+            'deactivated_at' => $now->toDateTimeString(),
+        ]);
+        $subscription->save();
+
+        // Optional: Downgrade user's plan to free/default
+        $subscription->user->update(['currentPlan' => 1]); // Assuming 1 is free plan
+
+        Log::info("Subscription {$subscription->subscriptionId} manually deactivated", ['user_id' => $subscription->userId]);
+
+        return response()->json([
+            'message' => 'Subscription deactivated successfully',
+            'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+        ]);
+    }
 }
+

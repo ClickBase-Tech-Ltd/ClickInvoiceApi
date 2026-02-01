@@ -294,7 +294,8 @@ Route::get('/plans', function () {
 
     Route::post('/subscribe/{planId}', [SubscriptionController::class, 'create']); // Add auth
      Route::put('/subscriptions/{planId}/cancel', [SubscriptionController::class, 'cancel']); // Add auth
-
+    Route::patch('/subscriptions/{subscriptionId}/activate', [SubscriptionController::class, 'activate']);
+    Route::patch('/subscriptions/{subscriptionId}/deactivate', [SubscriptionController::class, 'deactivate']);
 
     Route::get('/users/{id}/profile', [UsersController::class, 'profile']);
 
