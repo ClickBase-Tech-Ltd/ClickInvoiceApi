@@ -47,46 +47,70 @@ class SyncSubscriptions extends Command
 
    private function syncWithFlutterwave(Subscription $subscription)
 {
-    if (!$subscription->flutterwaveSubscriptionId) {
-         Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->subscriptionId}");
+    // 1️⃣ Check if Flutterwave subscription ID exists
+    if (!$subscription->flutterwave_subscription_id) {
+        Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->id}");
         return;
     }
+
     $secretKey = env('FLUTTERWAVE_SECRET_KEY');
-    $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
-        ->get("https://api.flutterwave.com/v3/subscriptions?transaction_id={$subscription->flutterwaveSubscriptionId}");
-    
-    Log::info($response);
+
+    // 2️⃣ Fetch subscription(s) from Flutterwave using the subscription ID
+    $response = Http::withHeaders([
+            'Authorization' => "Bearer $secretKey"
+        ])->get("https://api.flutterwave.com/v3/subscriptions", [
+            'transaction_id' => $subscription->flutterwave_subscription_id
+        ]);
+
+    // 3️⃣ Log raw response for debugging
+    Log::info('Flutterwave response', ['raw' => $response->body()]);
+
     if (!$response->successful()) {
-        $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
-         Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
+        $this->error("Failed Flutterwave sync for subscription {$subscription->id}");
+        Log::channel('daily')->error("Failed Flutterwave sync for subscription {$subscription->id}", [
+            'status' => $response->status(),
+            'body' => $response->body(),
+        ]);
         return;
     }
 
-    $data = $response->json('data');
-    $flutterwaveStatus = $data['status']; // active | cancelled | completed
+    // 4️⃣ Get the list of subscriptions from response
+    $subscriptions = $response->json('data', []); // defaults to empty array if 'data' is missing
 
-    // 1️⃣ Flutterwave cancelled/completed → update locally
-    if (in_array($flutterwaveStatus, ['cancelled', 'completed'])
-        && $subscription->status !== 'cancelled') {
+    // 5️⃣ Loop through Flutterwave subscriptions (usually only one, but API returns an array)
+    foreach ($subscriptions as $fwSub) {
+        $flutterwaveStatus = $fwSub['status'] ?? null; // active | cancelled | completed
 
-        $subscription->status = 'cancelled';
-        $subscription->save();
+        Log::info('Flutterwave subscription status', [
+            'fw_subscription_id' => $fwSub['id'] ?? null,
+            'status' => $flutterwaveStatus,
+            'email' => $fwSub['customer']['email'] ?? null,
+        ]);
 
-        $this->info("Subscription {$subscription->subscriptionId} cancelled via Flutterwave");
-        return;
-    }
+        // 6️⃣ Flutterwave cancelled/completed → update locally
+        if (in_array($flutterwaveStatus, ['cancelled', 'completed']) 
+            && $subscription->status !== 'cancelled') {
 
-    // 2️⃣ Local expiry → cancel on Flutterwave (once)
-    if (
-        $subscription->status === 'expired' &&
-        $flutterwaveStatus === 'active' &&
-        $subscription->flutterwaveCancelledAt === null
-    ) {
-        $this->cancelOnFlutterwave($subscription);
+            $subscription->status = 'cancelled';
+            $subscription->save();
 
-        $this->info("Cancelled Flutterwave subscription for {$subscription->subscriptionId}");
+            $this->info("Subscription {$subscription->id} cancelled via Flutterwave");
+            return; // no need to continue after local update
+        }
+
+        // 7️⃣ Local expiry → cancel on Flutterwave (once)
+        if (
+            $subscription->status === 'expired' &&
+            $flutterwaveStatus === 'active' &&
+            $subscription->flutterwave_cancelled_at === null
+        ) {
+            $this->cancelOnFlutterwave($subscription);
+
+            $this->info("Cancelled Flutterwave subscription for {$subscription->id}");
+        }
     }
 }
+
 
 
 
