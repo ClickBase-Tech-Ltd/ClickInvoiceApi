@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use App\Models\Subscription;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class SyncSubscriptions extends Command
 {
