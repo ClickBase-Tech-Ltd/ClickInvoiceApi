@@ -53,7 +53,7 @@ class SyncSubscriptions extends Command
     }
     $secretKey = env('FLUTTERWAVE_SECRET_KEY');
     $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
-        ->get("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}");
+        ->get("https://api.flutterwave.com/v3/subscriptions/rayiyk36@gmail.com");
     
     Log::info($response);
     if (!$response->successful()) {
