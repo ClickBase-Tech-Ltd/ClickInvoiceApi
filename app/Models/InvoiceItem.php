@@ -15,6 +15,8 @@ class InvoiceItem extends Model
         'invoiceNumber',
         'itemDescription',
         'amount',
+        'quantity',
+        'discountAmount',
     ];
 
     // Relationship

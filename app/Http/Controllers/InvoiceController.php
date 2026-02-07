@@ -42,6 +42,8 @@ class InvoiceController extends Controller
             'items' => 'required|array|min:1',
             'items.*.itemDescription' => 'required|string',
             'items.*.amount' => 'required|numeric|min:0',
+            'items.*.quantity' => 'required|numeric|min:0',
+            'items.*.discountAmount' => 'required|numeric|min:0',
             'amountPaid' => 'nullable|numeric|min:0',
         ]);
 
@@ -88,6 +90,8 @@ class InvoiceController extends Controller
             $invoice->items()->create([
                 'itemDescription' => $item['itemDescription'],
                 'amount' => $item['amount'],
+                'discountAmount' => $item['discountAmount'],
+                'quantity' => $item['quantity'],
             ]);
         }
 

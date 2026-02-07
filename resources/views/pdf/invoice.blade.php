@@ -173,18 +173,19 @@
             width: 100%;
             border-collapse: collapse;
             margin-top: 5px;
-            font-size: 15px;
+            font-size: 13px;
         }
 
         table th {
             background-color: #F3F4F6;
             text-align: left;
-            padding: 6px;
+            padding: 8px 6px;
             border-bottom: 1px solid #E5E7EB;
+            font-weight: 600;
         }
 
         table td {
-            padding: 6px;
+            padding: 8px 6px;
             border-bottom: 1px solid #E5E7EB;
         }
 
@@ -192,10 +193,18 @@
             text-align: right;
         }
 
+        table .text-center {
+            text-align: center;
+        }
+
+        .discount-row {
+            color: #dc2626;
+        }
+
         .total-row {
             background-color: #DBEAFE;
             font-weight: bold;
-            font-size: 16pt;
+            font-size: 14pt;
         }
 
         /* Payment Section */
@@ -338,32 +347,73 @@
             </div>
         </div>
 
-        <!-- Items Table -->
+        <!-- Items Table - Updated -->
         <table>
             <thead>
                 <tr>
                     <th>Description</th>
-                    <th class="text-right">Amount</th>
+                    <th class="text-center">Qty</th>
+                    <th class="text-right">Unit Price</th>
+                    <th class="text-right">Discount</th>
+                    <th class="text-right">Line Total</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($items as $item)
+                @php
+                    $gross = $item['quantity'] * ($item['amount'] + ($item['discountAmount'] ?? 0));
+                    $unitPrice = $gross / max(1, $item['quantity']);
+                    $discount = $item['discountAmount'] ?? 0;
+                @endphp
                 <tr>
                     <td>{{ $item['description'] }}</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($item['amount'],2) }}</td>
+                    <td class="text-center">{{ $item['quantity'] }}</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($unitPrice, 2) }}</td>
+                    <td class="text-right {{ $discount > 0 ? 'discount-row' : '' }}">
+                        @if($discount > 0)
+                            {{ $currencySymbol }} {{ number_format($discount, 2) }}
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($item['amount'], 2) }}</td>
                 </tr>
                 @endforeach
+
+                <!-- Totals -->
+                @php
+                    $totalDiscount = 0;
+                    $subtotalBefore = 0;
+                    foreach($items as $item) {
+                        $disc = $item['discountAmount'] ?? 0;
+                        $totalDiscount += $disc;
+                        $subtotalBefore += $item['quantity'] * ($item['amount'] + $disc);
+                    }
+                @endphp
+
                 <tr>
-                    <td class="text-right font-bold">Subtotal</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotal,2) }}</td>
+                    <td colspan="4" class="text-right font-bold">Subtotal (before discount)</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotalBefore, 2) }}</td>
                 </tr>
+
                 <tr>
-                    <td class="text-right font-bold">Tax ({{ $taxPercentage }}%)</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($taxAmount,2) }}</td>
+                    <td colspan="4" class="text-right font-bold discount-row">Total Discount</td>
+                    <td class="text-right discount-row">{{ $currencySymbol }} {{ number_format($totalDiscount, 2) }}</td>
                 </tr>
+
+                <tr>
+                    <td colspan="4" class="text-right font-bold">Subtotal (after discount)</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotal, 2) }}</td>
+                </tr>
+
+                <tr>
+                    <td colspan="4" class="text-right font-bold">Tax ({{ $taxPercentage }}%)</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($taxAmount, 2) }}</td>
+                </tr>
+
                 <tr class="total-row">
                     <td class="text-right">Total</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($totalAmount,2) }}</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</td>
                 </tr>
             </tbody>
         </table>

@@ -138,7 +138,9 @@ if (!empty($invoice->tenant->authorizedSignature)) {
             'items' => $invoice->items->map(function ($item) {
                 return [
                     'description' => $item->itemDescription,
-                    'amount' => (float) $item->amount
+                    'amount' => (float) $item->amount,
+                    'discountAmount' => (float) $item->discountAmount,
+                    'quantity' => $item->quantity
                 ];
             })
         ];
@@ -227,7 +229,9 @@ if (!empty($receipt->tenant->authorizedSignature)) {
             'items' => $receipt->items->map(function ($item) {
                 return [
                     'description' => $item->itemDescription,
-                    'amount' => (float) $item->amount
+                    'amount' => (float) $item->amount,
+                    'discountAmount' => (float) $item->discountAmount,
+                    'quantity' => $item->quantity
                 ];
             })
         ];
