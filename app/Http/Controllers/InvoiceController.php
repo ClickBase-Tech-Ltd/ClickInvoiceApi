@@ -20,87 +20,124 @@ class InvoiceController extends Controller
         return response()->json($invoices);
     }
     public function store(Request $request)
-    {
-        $user = Auth::user();
+{
+    $user = Auth::user();
 
-        if (!$user->canCreateInvoice()) {
-            return response()->json([
-                'message' => 'Sorry you can\'t add any more invoices. Upgrade to premium to generate more invoices.'
-            ], 403);
-        }
-
-        $tenantId = $request->header('X-Tenant-ID');
-        $request->validate([
-            'invoiceId' => 'required|unique:invoices,invoiceId',
-            'projectName' => 'nullable|string|max:255',
-            'invoiceDate' => 'nullable|date',
-            'dueDate' => 'nullable|date',
-            'currency' => 'nullable|exists:currencies,currencyId',
-            'tenantId' => 'nullable|exists:tenants,tenantId',
-            'createdBy' => 'nullable|exists:users,id',
-            'taxPercentage' => 'nullable|numeric|min:0',
-            'items' => 'required|array|min:1',
-            'items.*.itemDescription' => 'required|string',
-            'items.*.amount' => 'required|numeric|min:0',
-            'items.*.quantity' => 'required|numeric|min:0',
-            'items.*.discountAmount' => 'required|numeric|min:0',
-            'amountPaid' => 'nullable|numeric|min:0',
-        ]);
-
-        // Calculate total of items
-        $totalAmount = collect($request->items)->sum(fn($item) => $item['amount']);
-
-        // Apply tax if provided
-        $tax = $request->input('taxPercentage', 0);
-        $totalAmountWithTax = $tax > 0 ? $totalAmount * (1 + $tax / 100) : $totalAmount;
-
-        // Determine amountPaid and balanceDue
-        $amountPaid = $request->input('amountPaid', 0);
-        $balanceDue = $totalAmountWithTax - $amountPaid;
-
-        $getCurrency = Tenant::where('tenantId', $tenantId)->first();
-        // Create invoice
-        $invoice = Invoice::create(array_merge(
-            $request->only([
-                'invoiceId',
-                'userGeneratedInvoiceId',
-                'projectName',
-                'invoiceDate',
-                'dueDate',
-                'invoicePassword',
-                'notes',
-                'currency',
-                'accountName',
-                'accountNumber',
-                'bank',
-                'taxPercentage',
-                'customerId'
-            ]),
-            [
-                'amountPaid' => $amountPaid,
-                'balanceDue' => $balanceDue,
-                'tenantId' => $tenantId,
-                'createdBy' => auth()->id() ,
-                'currency' => $getCurrency->currency,
-            ]
-        ));
-
-        // Create invoice items
-        foreach ($request->items as $item) {
-            $invoice->items()->create([
-                'itemDescription' => $item['itemDescription'],
-                'amount' => $item['amount'],
-                'discountAmount' => $item['discountAmount'],
-                'quantity' => $item['quantity'],
-            ]);
-        }
-
+    if (!$user->canCreateInvoice()) {
         return response()->json([
-            'message' => 'Invoice created successfully',
-            'invoice' => $invoice->load('items')
-        ], 201);
+            'message' => 'Sorry you can\'t add any more invoices. Upgrade to premium to generate more invoices.'
+        ], 403);
     }
 
+    $tenantId = $request->header('X-Tenant-ID');
+
+    $request->validate([
+        'invoiceId'              => 'required|unique:invoices,invoiceId',
+        'projectName'            => 'nullable|string|max:255',
+        'invoiceDate'            => 'nullable|date',
+        'dueDate'                => 'nullable|date',
+        'currency'               => 'nullable|exists:currencies,currencyId',
+        'tenantId'               => 'nullable|exists:tenants,tenantId',
+        'createdBy'              => 'nullable|exists:users,id',
+        'taxPercentage'          => 'nullable|numeric|min:0',
+        'discountPercentage'     => 'nullable|numeric|min:0|max:100',
+        'amountPaid'             => 'nullable|numeric|min:0',
+        'items'                  => 'required|array|min:1',
+        'items.*.itemDescription'=> 'required|string',
+        'items.*.amount'         => 'required|numeric|min:0',     // unit price
+        'items.*.quantity'       => 'required|numeric|integer|min:1',
+        // 'items.*.discountAmount'  → removed from validation & usage
+    ]);
+
+    // ────────────────────────────────────────────────
+    // 1. Calculate subtotal (gross before any discount/tax)
+    // ────────────────────────────────────────────────
+    $subtotal = 0;
+    foreach ($request->items as $item) {
+        $qty    = (float) ($item['quantity'] ?? 1);
+        $amount = (float) ($item['amount'] ?? 0);   // unit price
+        $subtotal += $qty * $amount;
+    }
+
+    // ────────────────────────────────────────────────
+    // 2. Global discount (applied BEFORE tax - common in NG)
+    // ────────────────────────────────────────────────
+    $discountPercentage = (float) ($request->input('discountPercentage', 0));
+    $discountAmount     = $subtotal * ($discountPercentage / 100);
+    $amountAfterDiscount = max(0, $subtotal - $discountAmount);
+
+    // ────────────────────────────────────────────────
+    // 3. Tax (VAT) on discounted amount
+    // ────────────────────────────────────────────────
+    $taxPercentage = (float) ($request->input('taxPercentage', 0));
+    $taxAmount     = $amountAfterDiscount * ($taxPercentage / 100);
+
+    // ────────────────────────────────────────────────
+    // 4. Grand total & balance
+    // ────────────────────────────────────────────────
+    $totalAmount = $amountAfterDiscount + $taxAmount;
+    $amountPaid  = (float) ($request->input('amountPaid', 0));
+    $balanceDue  = max(0, $totalAmount - $amountPaid);
+
+    // ────────────────────────────────────────────────
+    // 5. Get tenant default currency if needed
+    // ────────────────────────────────────────────────
+    $tenant = Tenant::where('tenantId', $tenantId)->first();
+    $currency = $request->input('currency', $tenant ? $tenant->currency : null);
+
+    // ────────────────────────────────────────────────
+    // 6. Create main invoice record
+    // ────────────────────────────────────────────────
+    $invoice = Invoice::create(array_merge(
+        $request->only([
+            'invoiceId',
+            'userGeneratedInvoiceId',
+            'projectName',
+            'invoiceDate',
+            'dueDate',
+            'invoicePassword',
+            'notes',
+            'accountName',
+            'accountNumber',
+            'bank',
+            'taxPercentage',
+            'discountPercentage',
+            'customerId'
+        ]),
+        [
+            'subtotal'       => $subtotal,           // added - good for reporting / PDF
+            'discountAmount' => $discountAmount,     // added - optional but useful
+            'taxAmount'      => $taxAmount,          // added
+            'totalAmount'    => $totalAmount,
+            'amountPaid'     => $amountPaid,
+            'balanceDue'     => $balanceDue,
+            'tenantId'       => $tenantId,
+            'createdBy'      => auth()->id(),
+            'currency'       => $currency,
+            'status'         => $balanceDue >= $totalAmount ? 'UNPAID' : ($amountPaid > 0 ? 'PARTIAL' : 'PAID'),
+        ]
+    ));
+
+    // ────────────────────────────────────────────────
+    // 7. Create invoice items (NO per-line discount anymore)
+    // ────────────────────────────────────────────────
+    foreach ($request->items as $item) {
+        $invoice->items()->create([
+            'itemDescription' => $item['itemDescription'],
+            'quantity'        => (int) ($item['quantity'] ?? 1),
+            'amount'          => (float) ($item['amount'] ?? 0),  // unit price
+            // 'discountAmount'  → removed
+        ]);
+    }
+
+    // Reload with relations for response
+    $invoice->load('items');
+
+    return response()->json([
+        'message' => 'Invoice created successfully',
+        'invoice' => $invoice
+    ], 201);
+}
     /**
      * Get all invoices for the authenticated user.
      */

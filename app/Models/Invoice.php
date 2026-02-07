@@ -32,8 +32,8 @@ class Invoice extends Model
         'status',
         'createdBy',
         'customerId',
-        'receiptId'
-
+        'receiptId',
+        'discountPercentage'
     ];
 
     // Relationships

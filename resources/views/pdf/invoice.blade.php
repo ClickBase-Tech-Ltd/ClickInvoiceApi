@@ -1,11 +1,9 @@
-{{-- resources/views/pdf/invoice.blade.php --}}
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>Invoice {{ $invoice->userGeneratedInvoiceId ?? $invoice->invoiceId }}</title>
     <style>
-        /* Base Styles */
         body {
             font-family: 'DejaVu Sans', Arial, sans-serif;
             font-size: 11px;
@@ -21,7 +19,6 @@
             padding: 3px;
         }
 
-        /* Watermark */
         .watermark {
             position: absolute;
             top: 50%;
@@ -38,7 +35,6 @@
             height: auto;
         }
 
-        /* Header + Invoice Title */
         .header-invoice {
             display: flex;
             justify-content: space-between;
@@ -49,7 +45,6 @@
             gap: 15px;
         }
 
-        /* Left: Invoice info */
         .invoice-info {
             display: flex;
             flex-direction: column;
@@ -75,7 +70,6 @@
             color: #374151;
         }
 
-        /* Right: Company info */
         .company-info {
             display: flex;
             flex-wrap: nowrap;
@@ -109,7 +103,6 @@
             color: #374151;
         }
 
-        /* Customer & Amount Info */
         .info-section {
             display: flex;
             justify-content: space-between;
@@ -168,7 +161,6 @@
             margin: 1px 0 0 0;
         }
 
-        /* Items Table */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -201,28 +193,31 @@
             color: #dc2626;
         }
 
+        .discount-row-bold {
+            color: #dc2626;
+            font-weight: 700;
+        }
+
         .total-row {
             background-color: #DBEAFE;
             font-weight: bold;
             font-size: 14pt;
         }
 
-        /* Payment Section */
         .payment-section {
             margin: 1px 0;
             padding: 4px 6px;
             background-color: #F0FDF4;
             border-radius: 4px;
-            font-size: 13.5px; /* increased base text size */
+            font-size: 13.5px;
         }
 
         .payment-section h3 {
             margin: 0 0 3px 0;
             font-weight: 600;
-            font-size: 14.5px; /* clearer section title */
+            font-size: 14.5px;
         }
 
-        /* Tight spacing + readable text */
         .payment-section p {
             margin: 0;
             line-height: 1.25;
@@ -234,20 +229,18 @@
             font-size: 13.8px;
         }
 
-        /* Notes */
         .notes {
             background-color: #F9FAFB;
-            padding: 3px 3px; /* top/bottom padding reduced */
+            padding: 3px 3px;
             border-radius: 4px;
             font-size: 12px;
         }
 
         .notes h3 {
             font-weight: 600;
-            font-size: 12px; /* optional: make slightly smaller if needed */
+            font-size: 12px;
         }
 
-        /* Signature */
         .signature-section {
             margin-top: 5px;
             display: flex;
@@ -270,7 +263,6 @@
             color: #6B7280;
         }
 
-        /* Footer */
         .footer-note {
             margin-top: 5px;
             text-align: center;
@@ -287,7 +279,7 @@
     </style>
 </head>
 <body>
-    {{-- Watermark --}}
+
     @if((int) $current_plan === 1)
     <div class="watermark">
         <img src="https://app.clickinvoice.clickbase.tech/images/logo/logo.svg" alt="ClickInvoice Logo">
@@ -297,10 +289,7 @@
 
     <div class="container">
 
-        <!-- Header + Invoice Title Row -->
         <div class="header-invoice">
-
-            <!-- Left: Invoice Title & Number -->
             <div class="invoice-info">
                 <h1>INVOICE</h1>
                 <p>#{{ $userGeneratedInvoiceId ?? $invoiceId }}</p>
@@ -309,7 +298,6 @@
                 </p>
             </div>
 
-            <!-- Right: Company Logo + Details -->
             <div class="company-info">
                 <div class="company-logo">
                     @if($logoUrl)
@@ -324,7 +312,6 @@
             </div>
         </div>
 
-        <!-- Customer & Amount Info -->
         <div class="info-section">
             <div class="customer-info">
                 <h1>{{ $projectName }}</h1>
@@ -341,84 +328,73 @@
                 @endif
             </div>
             <div class="amount-info">
-                <p class="total">{{ $currencySymbol }} {{ number_format($totalAmount,2) }}</p>
+                <p class="total">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</p>
                 <p class="balance-label">Balance Due</p>
-                <p class="balance-due">{{ $currencySymbol }} {{ number_format($balanceDue,2) }}</p>
+                <p class="balance-due">{{ $currencySymbol }} {{ number_format($balanceDue, 2) }}</p>
             </div>
         </div>
 
-        <!-- Items Table - Updated -->
         <table>
             <thead>
                 <tr>
                     <th>Description</th>
                     <th class="text-center">Qty</th>
                     <th class="text-right">Unit Price</th>
-                    <th class="text-right">Discount</th>
                     <th class="text-right">Line Total</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($items as $item)
-                @php
-                    $gross = $item['quantity'] * ($item['amount'] + ($item['discountAmount'] ?? 0));
-                    $unitPrice = $gross / max(1, $item['quantity']);
-                    $discount = $item['discountAmount'] ?? 0;
-                @endphp
                 <tr>
                     <td>{{ $item['description'] }}</td>
                     <td class="text-center">{{ $item['quantity'] }}</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($unitPrice, 2) }}</td>
-                    <td class="text-right {{ $discount > 0 ? 'discount-row' : '' }}">
-                        @if($discount > 0)
-                            {{ $currencySymbol }} {{ number_format($discount, 2) }}
-                        @else
-                            —
-                        @endif
-                    </td>
                     <td class="text-right">{{ $currencySymbol }} {{ number_format($item['amount'], 2) }}</td>
+                    <td class="text-right">{{ $currencySymbol }} {{ number_format($item['quantity'] * $item['amount'], 2) }}</td>
                 </tr>
                 @endforeach
 
                 <!-- Totals -->
-                @php
-                    $totalDiscount = 0;
-                    $subtotalBefore = 0;
-                    foreach($items as $item) {
-                        $disc = $item['discountAmount'] ?? 0;
-                        $totalDiscount += $disc;
-                        $subtotalBefore += $item['quantity'] * ($item['amount'] + $disc);
-                    }
-                @endphp
-
                 <tr>
-                    <td colspan="4" class="text-right font-bold">Subtotal (before discount)</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotalBefore, 2) }}</td>
-                </tr>
-
-                <tr>
-                    <td colspan="4" class="text-right font-bold discount-row">Total Discount</td>
-                    <td class="text-right discount-row">{{ $currencySymbol }} {{ number_format($totalDiscount, 2) }}</td>
-                </tr>
-
-                <tr>
-                    <td colspan="4" class="text-right font-bold">Subtotal (after discount)</td>
+                    <td colspan="3" class="text-right font-bold">Subtotal</td>
                     <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotal, 2) }}</td>
                 </tr>
 
+                @if(!empty($discountPercentage) && $discountPercentage > 0)
+                <tr class="discount-row">
+                    <td colspan="3" class="text-right discount-row-bold">
+                        Discount ({{ number_format($discountPercentage, 1) }}%)
+                    </td>
+                    <td class="text-right discount-row">
+                        -{{ $currencySymbol }} {{ number_format($discountAmount ?? 0, 2) }}
+                    </td>
+                </tr>
+                @endif
+
                 <tr>
-                    <td colspan="4" class="text-right font-bold">Tax ({{ $taxPercentage }}%)</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($taxAmount, 2) }}</td>
+                    <td colspan="3" class="text-right font-bold">Subtotal after discount</td>
+                    <td class="text-right">
+                        {{ $currencySymbol }} {{ number_format($subtotalAfterDiscount ?? $subtotal, 2) }}
+                    </td>
                 </tr>
 
+                @if(!empty($taxPercentage) && $taxPercentage > 0)
+                <tr>
+                    <td colspan="3" class="text-right font-bold">Tax ({{ number_format($taxPercentage, 1) }}%)</td>
+                    <td class="text-right">
+                        {{ $currencySymbol }} {{ number_format($taxAmount, 2) }}
+                    </td>
+                </tr>
+                @endif
+
                 <tr class="total-row">
-                    <td class="text-right">Total</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</td>
+                    <td colspan="3" class="text-right">Total</td>
+                    <td class="text-right">
+                        {{ $currencySymbol }} {{ number_format($totalAmount, 2) }}
+                    </td>
                 </tr>
             </tbody>
         </table>
 
-        <!-- Payment Section -->
         <div class="payment-section">
             <h3>Payment Details</h3>
             <p><strong>Account Name:</strong> {{ $accountName }}</p>
@@ -426,7 +402,6 @@
             <p><strong>Bank:</strong> {{ $bank }}</p>
         </div>
 
-        <!-- Notes -->
         @if($notes)
         <div class="notes">
             <h3>Notes</h3>
@@ -434,16 +409,14 @@
         </div>
         @endif
 
-        <!-- Receipt Notes / Appreciation -->
         <div class="notes" style="white-space: nowrap;">
             <p>
-                Thanks for your patronage! For any questions, please contact <strong>{{ $companyName }}</strong> via 
-                <a href="mailto:{{ $companyEmail }}" style="color: #0A66C2; text-decoration: none;">{{ $companyEmail }}</a> 
+                Thanks for your patronage! For any questions, please contact <strong>{{ $companyName }}</strong> via
+                <a href="mailto:{{ $companyEmail }}" style="color: #0A66C2; text-decoration: none;">{{ $companyEmail }}</a>
                 or call {{ $companyPhone }}.
             </p>
         </div>
 
-        <!-- Signature -->
         @if($signatureUrl)
         <div class="signature-section">
             <div class="signature-container">
@@ -453,7 +426,6 @@
         </div>
         @endif
 
-        <!-- Footer -->
         @if((int) $current_plan === 1)
         <div class="footer-note">
             This invoice was generated at

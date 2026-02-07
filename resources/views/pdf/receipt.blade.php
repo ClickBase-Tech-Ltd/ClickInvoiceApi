@@ -19,7 +19,6 @@
             padding: 20px;
         }
 
-        /* Header */
         .header-invoice {
             display: flex;
             justify-content: space-between;
@@ -29,7 +28,6 @@
             margin-bottom: 25px;
         }
 
-        /* Left: Receipt Title & Number */
         .invoice-info {
             display: flex;
             flex-direction: column;
@@ -48,7 +46,6 @@
             color: #374151;
         }
 
-        /* Right: Company Logo + Details */
         .company-info {
             display: flex;
             flex-wrap: nowrap;
@@ -76,7 +73,6 @@
             color: #374151;
         }
 
-        /* Customer & Amount Info */
         .info-section {
             display: flex;
             justify-content: space-between;
@@ -133,7 +129,6 @@
             margin: 1px 0 0 0;
         }
 
-        /* Items Table */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -166,6 +161,11 @@
             color: #dc2626;
         }
 
+        .discount-row-bold {
+            color: #dc2626;
+            font-weight: 700;
+        }
+
         .total-row {
             background-color: #DBEAFE;
             font-weight: bold;
@@ -179,7 +179,6 @@
             color: #166534;
         }
 
-        /* Payment Section */
         .payment-section {
             margin: 25px 0;
             padding: 12px 16px;
@@ -203,7 +202,6 @@
             font-weight: 600;
         }
 
-        /* Notes */
         .notes {
             background-color: #F9FAFB;
             padding: 12px;
@@ -218,7 +216,6 @@
             font-size: 13px;
         }
 
-        /* Signature */
         .signature-section {
             margin-top: 40px;
             display: flex;
@@ -245,7 +242,6 @@
             font-family: 'DejaVu Sans', monospace;
         }
 
-        /* Footer */
         .footer-note {
             margin-top: 40px;
             text-align: center;
@@ -264,19 +260,14 @@
 <body>
     <div class="container">
 
-        <!-- Header + Receipt Title Row -->
+        <!-- Header -->
         <div class="header-invoice">
-
-            <!-- Left: Receipt Title & Number -->
             <div class="invoice-info">
                 <h1>RECEIPT</h1>
                 <p>#{{ $userGeneratedReceiptId ?? $receiptId }}</p>
-                <p class="invoice-date">
-                    Date: {{ \Carbon\Carbon::parse($receiptDate)->format('d M, Y') }}
-                </p>
+                <p>Date: {{ \Carbon\Carbon::parse($receiptDate)->format('d M, Y') }}</p>
             </div>
 
-            <!-- Right: Company Logo + Details -->
             <div class="company-info">
                 <div class="company-logo">
                     @if($logoUrl)
@@ -293,7 +284,7 @@
             </div>
         </div>
 
-        <!-- Customer & Amount Info -->
+        <!-- Customer & Paid Amount -->
         <div class="info-section">
             <div class="customer-info">
                 <h2>{{ $customerName }}</h2>
@@ -308,89 +299,82 @@
                 @endif
             </div>
             <div class="amount-info">
-                <p class="total">{{ $currencySymbol }} {{ number_format($amountPaid,2) }}</p>
+                <p class="total">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
                 <p class="balance-label">Amount Paid</p>
-                <p class="balance-due">{{ $currencySymbol }} {{ number_format($amountPaid,2) }}</p>
+                <p class="balance-due">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
             </div>
         </div>
 
-        <!-- Items Table - Updated -->
+        <!-- Items Table -->
         <table>
             <thead>
                 <tr>
                     <th>Description</th>
                     <th class="text-center">Qty</th>
                     <th class="text-right">Unit Price</th>
-                    <th class="text-right">Discount</th>
                     <th class="text-right">Line Total</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($items as $item)
-                @php
-                    $gross = $item['quantity'] * ($item['amount'] + ($item['discountAmount'] ?? 0));
-                    $unitPrice = $gross / max(1, $item['quantity']);
-                    $discount = $item['discountAmount'] ?? 0;
-                @endphp
                 <tr>
                     <td>{{ $item['description'] }}</td>
                     <td class="text-center">{{ $item['quantity'] }}</td>
-                    <td class="text-right amount">{{ $currencySymbol }} {{ number_format($unitPrice, 2) }}</td>
-                    <td class="text-right {{ $discount > 0 ? 'discount-row' : '' }}">
-                        @if($discount > 0)
-                            {{ $currencySymbol }} {{ number_format($discount, 2) }}
-                        @else
-                            —
-                        @endif
-                    </td>
                     <td class="text-right amount">{{ $currencySymbol }} {{ number_format($item['amount'], 2) }}</td>
+                    <td class="text-right amount">{{ $currencySymbol }} {{ number_format($item['quantity'] * $item['amount'], 2) }}</td>
                 </tr>
                 @endforeach
 
                 <!-- Totals -->
-                @php
-                    $totalDiscount = 0;
-                    $subtotalBefore = 0;
-                    foreach($items as $item) {
-                        $disc = $item['discountAmount'] ?? 0;
-                        $totalDiscount += $disc;
-                        $subtotalBefore += $item['quantity'] * ($item['amount'] + $disc);
-                    }
-                @endphp
-
                 <tr>
-                    <td colspan="4" class="text-right font-bold">Subtotal (before discount)</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotalBefore, 2) }}</td>
-                </tr>
-
-                <tr>
-                    <td colspan="4" class="text-right font-bold discount-row">Total Discount</td>
-                    <td class="text-right discount-row">{{ $currencySymbol }} {{ number_format($totalDiscount, 2) }}</td>
-                </tr>
-
-                <tr>
-                    <td colspan="4" class="text-right font-bold">Subtotal (after discount)</td>
+                    <td colspan="3" class="text-right font-bold">Subtotal</td>
                     <td class="text-right">{{ $currencySymbol }} {{ number_format($subtotal, 2) }}</td>
                 </tr>
 
+                @if($discountPercentage > 0 && $discountAmount > 0)
+                <tr class="discount-row">
+                    <td colspan="3" class="text-right discount-row-bold">
+                        Discount ({{ number_format($discountPercentage, 1) }}%)
+                    </td>
+                    <td class="text-right discount-row">
+                        -{{ $currencySymbol }} {{ number_format($discountAmount, 2) }}
+                    </td>
+                </tr>
+                @endif
+
                 <tr>
-                    <td colspan="4" class="text-right font-bold">Tax ({{ $taxPercentage }}%)</td>
-                    <td class="text-right">{{ $currencySymbol }} {{ number_format($taxAmount, 2) }}</td>
+                    <td colspan="3" class="text-right font-bold">Subtotal after discount</td>
+                    <td class="text-right">
+                        {{ $currencySymbol }} {{ number_format($subtotalAfterDiscount, 2) }}
+                    </td>
                 </tr>
 
+                @if($taxPercentage > 0 && $taxAmount > 0)
+                <tr>
+                    <td colspan="3" class="text-right font-bold">Tax ({{ number_format($taxPercentage, 1) }}%)</td>
+                    <td class="text-right">
+                        {{ $currencySymbol }} {{ number_format($taxAmount, 2) }}
+                    </td>
+                </tr>
+                @endif
+
                 <tr class="total-row">
-                    <td colspan="4" class="text-right">Total</td>
-                    <td class="text-right amount">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</td>
+                    <td colspan="3" class="text-right">Invoice Total</td>
+                    <td class="text-right amount">
+                        {{ $currencySymbol }} {{ number_format($totalAmount, 2) }}
+                    </td>
                 </tr>
 
                 <tr class="paid-row">
-                    <td colspan="4" class="text-right">Amount Paid</td>
-                    <td class="text-right amount">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</td>
+                    <td colspan="3" class="text-right">Amount Paid</td>
+                    <td class="text-right amount">
+                        {{ $currencySymbol }} {{ number_format($amountPaid, 2) }}
+                    </td>
                 </tr>
             </tbody>
         </table>
 
-        <!-- Payment Section -->
+        <!-- Payment Details -->
         <div class="payment-section">
             <h3>Payment Details</h3>
             <p><strong>Account Name:</strong> {{ $accountName }}</p>
@@ -398,11 +382,12 @@
             <p><strong>Bank:</strong> {{ $bank }}</p>
         </div>
 
-        <!-- Receipt Notes / Appreciation -->
+        <!-- Appreciation / Notes -->
         <div class="notes" style="white-space: nowrap;">
             <p>
-                Thanks for your patronage! For any questions, please contact <strong>{{ $companyName }}</strong> via 
-                <a href="mailto:{{ $companyEmail }}" style="color: #0A66C2; text-decoration: none;">{{ $companyEmail }}</a> 
+                Thank you for your payment!<br>
+                For any questions, please contact <strong>{{ $companyName }}</strong> via
+                <a href="mailto:{{ $companyEmail }}" style="color: #0A66C2; text-decoration: none;">{{ $companyEmail }}</a>
                 or call {{ $companyPhone }}.
             </p>
         </div>
