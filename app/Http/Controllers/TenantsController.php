@@ -42,7 +42,8 @@ public function myTenants(Request $request)
         // Validate the request data
         $validated = $request->validate([
             'tenantName' => 'required|string|max:255',
-
+            'tenantAddress' => 'nullable|string',
+            'taxId' => 'nullable|string',
             'tenantEmail' => 'required|email',
             'tenantPhone' => 'nullable|string',
             'tenantLogo' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
@@ -167,6 +168,8 @@ public function update(Request $request, $tenantId)
     $validated = $request->validate([
         'tenantName' => 'required|string|max:255',
         'tenantEmail' => 'required|email|max:255',
+        'tenantAddress' => 'nullable|string',
+        'taxId' => 'nullable|string',
         'tenantPhone' => 'nullable|string|max:20',
          'tenantLogo' => 'sometimes|file|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
 'authorizedSignature' => 'sometimes|file|image|mimes:png,jpg,jpeg,svg|max:2048',

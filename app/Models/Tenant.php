@@ -25,6 +25,7 @@ class Tenant extends Model
         'isDefault',
         'tenantAddress',
         'status',
+        'taxId'
     ];
 
     public function currency()
