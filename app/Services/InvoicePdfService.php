@@ -143,8 +143,10 @@ class InvoicePdfService
         'signatureUrl'          => $signatureUrl,
 
         'companyName'           => $invoice->tenant->tenantName,
+        'companyAddress'           => $invoice->tenant->tenantAddress,
         'companyEmail'          => $invoice->tenant->tenantEmail,
         'companyPhone'          => $invoice->tenant->tenantPhone,
+        'companyTaxId'          => $invoice->tenant->taxId,
 
         'customerName'          => $invoice->customer->customerName ?? $invoice->accountName,
         'customerEmail'         => $invoice->customer->customerEmail ?? null,
@@ -244,8 +246,10 @@ class InvoicePdfService
         'signatureUrl'          => $signatureUrl,
 
         'companyName'           => $receipt->tenant->tenantName,
+        'companyAddress'           => $receipt->tenant->tenantAddress,
         'companyEmail'          => $receipt->tenant->tenantEmail,
         'companyPhone'          => $receipt->tenant->tenantPhone,
+        'companyTaxId'          => $receipt->tenant->taxId,
 
         'customerName'          => $receipt->customer->customerName ?? $receipt->accountName,
         'customerEmail'         => $receipt->customer->customerEmail ?? null,

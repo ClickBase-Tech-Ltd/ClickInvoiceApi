@@ -278,8 +278,12 @@
                 </div>
                 <div class="company-details">
                     <h1>{{ $companyName }}</h1>
+                    <p>{{ $companyAddress }}</p>
                     <p>{{ $companyEmail }}</p>
                     <p>{{ $companyPhone }}</p>
+                    @if(!empty($companyTaxId))
+                    <p style="font-weight:bold;">Tax ID: {{ $companyTaxId }}</p>
+                    @endif
                 </div>
             </div>
         </div>
