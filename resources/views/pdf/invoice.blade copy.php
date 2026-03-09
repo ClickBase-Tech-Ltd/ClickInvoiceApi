@@ -39,7 +39,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #E5E7EB;
+            border-bottom: 2px solid #E5E7EB;
             padding: 3px 0;
             margin: 1px 0 5px 0;
             gap: 15px;
@@ -282,74 +282,65 @@
 
     @if((int) $current_plan === 1)
     <div class="watermark">
-        <img src="/public/images/logo copy.svg" alt="ClickInvoice Logo" style="max-width: 400px; max-height: 180px; width: auto; height: auto; object-fit: contain; display: inline-block;">
+        <img src="/public/images/logo copy.svg" alt="ClickInvoice Logo">
         <div class="watermark-note">Remove this logo for just $2.5</div>
     </div>
     @endif
 
-    <div class="container">
 
-        <div class="header-invoice" style="position:relative; background: #fff; box-shadow: 0 2px 12px #e5e7eb; border-radius: 12px; padding: 0; margin-top: -8px; margin-bottom: 10px;">
-            <table style="width:100%; border:none; border-collapse:collapse; margin-bottom:0;">
-                <tr>
-                    <td style="width:60%; vertical-align:top; padding:0;">
-                        <div style="display:flex; align-items:flex-start; gap:0px;">
-                            <div class="company-logo">
-                                @if($logoUrl)
-                                    <img src="{{ $logoUrl }}" alt="Company Logo" style="height: 90px; width: auto; object-fit: contain;">
-                                @endif
-                            </div>
-                            <div class="company-details" style="font-size: 15px; color: #1F2937; margin-top:2px;">
-                                <div style="font-size: 22px; font-weight: 800; color: #0A66C2; margin-bottom: 0px; margin-top:-8px;">{{ $companyName }}</div>
-                                <div>{{ $companyAddress }}</div>
-                                <div>{{ $companyEmail }}</div>
-                                <div>{{ $companyPhone }}</div>
-                                @if(!empty($companyTaxId))
-                                <div style="font-weight: bold; color: #374151;">Tax ID: {{ $companyTaxId }}</div>
-                                @endif
-                            </div>
-                        </div>
-                    </td>
-                    <td style="width:40%; vertical-align:top; text-align:right; padding:0;">
-                        <div style="display:flex; align-items:flex-start; gap:0px;">
-                            <div style="font-size: 28px; font-weight: 900; color: #0A66C2; letter-spacing: 2px; margin-bottom: 0px;">INVOICE</div>
-                            <div style="display:flex; flex-direction:column; align-items:flex-end;">
-                                <div style="font-weight:700; font-size:15px; color:#374151;">Invoice #: {{ $userGeneratedInvoiceId ?? $invoiceId }}</div>
-                                <div style="font-weight:700; font-size:14px; color:#374151;">Date: {{ \Carbon\Carbon::parse($invoice->invoiceDate ?? $invoice->created_at)->format('d M, Y') }}</div>
-                            </div>
-                        </div>
-                    </td>
-                </tr>
-            </table>
+    <div class="container">
+        <div class="header-invoice" style="position:relative;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div class="company-info" style="flex:1;">
+                    <div class="company-logo">
+                        @if($logoUrl)
+                            <img src="{{ $logoUrl }}" alt="Company Logo">
+                        @endif
+                    </div>
+                    <div class="company-details">
+                        <h1>{{ $companyName }}</h1>
+                        <p>{{ $companyAddress }}</p>
+                        <p>{{ $companyEmail }}</p>
+                        <p>{{ $companyPhone }}</p>
+                        @if(!empty($companyTaxId))
+                        <p style="font-weight:bold;">Tax ID: {{ $companyTaxId }}</p>
+                        @endif
+                    </div>
+                </div>
+                <div class="invoice-info" style="flex:1; text-align:right;">
+                    <h1 style="margin-bottom:5px;">INVOICE</h1>
+                    <p style="font-size:16px; font-weight:600; color:#0A66C2;">#{{ $userGeneratedInvoiceId ?? $invoiceId }}</p>
+                    <p class="invoice-date" style="font-size:13px; color:#374151;">Date: {{ \Carbon\Carbon::parse($invoice->invoiceDate ?? $invoice->created_at)->format('d M, Y') }}</p>
+                </div>
+            </div>
+            @if(isset($invoice) && $invoice->status !== 'paid')
+            <div style="position:absolute; top:0; right:0;">
+                <span style="background:#dc2626; color:#fff; font-weight:700; padding:6px 18px; border-radius:18px; font-size:15px; letter-spacing:1px;">UNPAID</span>
+            </div>
+            @endif
         </div>
 
-        <table style="width:100%; border:none; border-collapse:collapse; margin-bottom:16px;">
-            <tr>
-                <td style="width:60%; vertical-align:top; padding:0;">
-                    <div class="customer-info">
-                        <h1 style="font-size:22px; font-weight:bold; margin:0 0 2px 0;">{{ $projectName }}</h1>
-                        <p class="customer-label" style="font-weight:600; color:#374151; margin-top:2px; font-size:14px;">Bill To:</p>
-                        <p style="font-weight:600; font-size:15px; color:#111827; margin:1px 0;">{{ $customerName }}</p>
-                        @if($customerAddress)
-                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerAddress }}</p>
-                        @endif
-                        @if($customerEmail)
-                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerEmail }}</p>
-                        @endif
-                        @if($customerPhone)
-                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerPhone }}</p>
-                        @endif
-                    </div>
-                </td>
-                <td style="width:40%; vertical-align:top; text-align:right; padding:0;">
-                    <div class="amount-info" style="text-align:right; min-width:150px; margin-top:2px;">
-                        <p class="total" style="font-size:24px; font-weight:bold; margin:0; color:#0A66C2;">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</p>
-                        <p class="balance-label" style="font-size:15px; color:#6B7280; margin:1px 0 0 0;">Balance Due</p>
-                        <p class="balance-due" style="font-size:17px; font-weight:600; color:#dc2626; margin:1px 0 0 0;">{{ $currencySymbol }} {{ number_format($balanceDue, 2) }}</p>
-                    </div>
-                </td>
-            </tr>
-        </table>
+        <div class="info-section">
+            <div class="customer-info">
+                <h1>{{ $projectName }}</h1>
+                <p class="customer-label">Bill To:</p>
+                <p style="font-weight:600;">{{ $customerName }}</p>
+                @if($customerAddress)
+                    <p class="customer-details">{{ $customerAddress }}</p>
+                @endif
+                @if($customerEmail)
+                    <p class="customer-details">{{ $customerEmail }}</p>
+                @endif
+                @if($customerPhone)
+                    <p class="customer-details">{{ $customerPhone }}</p>
+                @endif
+            </div>
+            <div class="amount-info">
+                <p class="total">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</p>
+                <p class="balance-label">Balance Due</p>
+                <p class="balance-due">{{ $currencySymbol }} {{ number_format($balanceDue, 2) }}</p>
+            </div>
+        </div>
 
         <table>
             <thead>

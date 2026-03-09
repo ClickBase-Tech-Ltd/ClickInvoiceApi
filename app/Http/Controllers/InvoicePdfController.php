@@ -174,15 +174,52 @@ public function sendEmail(Request $request, $id)
     $result = $this->pdfService->generateReceiptPdf($receipt);
 
     try {
-        \Mail::send('emails.receipt', [
-            'receipt' => $receipt,
-            'customerName' => $emailCustomerName  // ← "Customer" if alternate email used
-        ], function ($message) use ($receipt, $toEmail, $result) {
+        // Build HTML with an embedded inline logo so email clients receive the image as CID
+        \Mail::send([], [], function ($message) use ($receipt, $toEmail, $result, $emailCustomerName) {
             $message->to($toEmail)
-                ->subject('Receipt: ' . ($receipt->userGeneratedReceiptId ?? $receipt->receiptId))
-                ->attachData($result['pdf_content'], $result['filename'], [
-                    'mime' => 'application/pdf',
-                ]);
+                ->subject('Receipt: ' . ($receipt->userGeneratedReceiptId ?? $receipt->receiptId));
+
+            // Embed logo and render the view with the returned CID.
+            // Prefer a PNG (better Gmail support), fall back to SVG or local files.
+            $logoCid = null;
+            $remotePngUrl = 'https://app.clickinvoice.app/images/logo/logo.png';
+            $remoteSvgUrl = 'https://app.clickinvoice.app/images/logo/logo.svg';
+            try {
+                $logoData = @file_get_contents($remotePngUrl);
+                if ($logoData !== false) {
+                    $logoCid = $message->embedData($logoData, 'logo.png', 'image/png');
+                } else {
+                    $logoData = @file_get_contents($remoteSvgUrl);
+                    if ($logoData !== false) {
+                        $logoCid = $message->embedData($logoData, 'logo.svg', 'image/svg+xml');
+                    } else {
+                        // Try local PNG then local SVG fallbacks
+                        $localPng = public_path('images/logo.png');
+                        $localSvg = public_path('images/logo2.svg');
+                        if (file_exists($localPng)) {
+                            $logoCid = $message->embed($localPng);
+                        } elseif (file_exists($localSvg)) {
+                            $logoCid = $message->embed($localSvg);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // fallback: leave logoCid null so view uses hosted URL
+                \Log::warning('Could not embed receipt logo: ' . $e->getMessage());
+            }
+
+            $html = view('emails.receipt', [
+                'receipt' => $receipt,
+                'customerName' => $emailCustomerName,
+                'logoCid' => $logoCid,
+            ])->render();
+
+            $message->setBody($html, 'text/html');
+
+            // Attach PDF
+            $message->attachData($result['pdf_content'], $result['filename'], [
+                'mime' => 'application/pdf',
+            ]);
         });
 
         // Update receipt with sent timestamp and actual recipient

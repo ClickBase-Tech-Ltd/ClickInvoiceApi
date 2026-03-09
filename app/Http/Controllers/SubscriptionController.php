@@ -264,5 +264,49 @@ public function activate(Request $request, $subscriptionId)
             'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
         ]);
     }
+
+    // PATCH /subscriptions/{id}/expire
+    public function expire(Request $request, $subscriptionId)
+    {
+        $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
+
+        $request->validate([
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        if (!$subscription) {
+            return response()->json(['error' => 'Subscription not found'], 404);
+        }
+
+        if ($subscription->status !== 'active') {
+            return response()->json(['message' => 'Subscription is not active'], 400);
+        }
+
+        $now = Carbon::now();
+
+        // Mark as expired locally without contacting Flutterwave (manual/admin expire)
+        $subscription->status = 'expired';
+        $subscription->endDate = $now;
+        $subscription->metadata = array_merge($subscription->metadata ?? [], [
+            'manual_expire' => true,
+            'expire_reason' => $request->reason,
+            'expired_at' => $now->toDateTimeString(),
+        ]);
+        $subscription->save();
+
+        // Downgrade user plan to default/free
+        try {
+            $subscription->user->update(['currentPlan' => 1]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to downgrade user after expire', ['subscription' => $subscriptionId, 'error' => $e->getMessage()]);
+        }
+
+        Log::info("Subscription {$subscription->subscriptionId} manually expired", ['user_id' => $subscription->userId]);
+
+        return response()->json([
+            'message' => 'Subscription expired successfully',
+            'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+        ]);
+    }
 }
 

@@ -173,17 +173,17 @@
         }
 
         .paid-row {
-            background-color: #bbf7d0;
             font-weight: bold;
             font-size: 13pt;
-            color: #166534;
+            color: #111827;
+            background-color: rgba(10,102,194,0.08);
         }
 
         .payment-section {
-            margin: 25px 0;
-            padding: 12px 16px;
+            margin: 1px 0;
+            padding: 4px 6px;
             background-color: #F0FDF4;
-            border-radius: 6px;
+            border-radius: 4px;
             font-size: 13.5px;
         }
 
@@ -258,56 +258,70 @@
     </style>
 </head>
 <body>
+
     <div class="container">
 
-        <!-- Header -->
-        <div class="header-invoice">
-            <div class="invoice-info">
-                <h1>RECEIPT</h1>
-                <p>#{{ $userGeneratedReceiptId ?? $receiptId }}</p>
-                <p>Date: {{ \Carbon\Carbon::parse($receiptDate)->format('d M, Y') }}</p>
-            </div>
-
-            <div class="company-info">
-                <div class="company-logo">
-                    @if($logoUrl)
-                        <img src="{{ $logoUrl }}" alt="Company Logo">
-                    @else
-                        <div class="logo-placeholder">Company Logo</div>
-                    @endif
-                </div>
-                <div class="company-details">
-                    <h1>{{ $companyName }}</h1>
-                    <p>{{ $companyAddress }}</p>
-                    <p>{{ $companyEmail }}</p>
-                    <p>{{ $companyPhone }}</p>
-                    @if(!empty($companyTaxId))
-                    <p style="font-weight:bold;">Tax ID: {{ $companyTaxId }}</p>
-                    @endif
-                </div>
-            </div>
+        <div class="header-invoice" style="position:relative; background: #fff; box-shadow: 0 2px 12px #e5e7eb; border-radius: 12px; padding: 0; margin-top: -8px; margin-bottom: 10px;">
+            <table style="width:100%; border:none; border-collapse:collapse; margin-bottom:0;">
+                <tr>
+                    <td style="width:60%; vertical-align:top; padding:0;">
+                        <div style="display:flex; align-items:flex-start; gap:0px;">
+                            <div class="company-logo">
+                                @if($logoUrl)
+                                    <img src="{{ $logoUrl }}" alt="Company Logo" style="height: 90px; width: auto; object-fit: contain;">
+                                @endif
+                            </div>
+                            <div class="company-details" style="font-size: 15px; color: #1F2937; margin-top:2px;">
+                                <div style="font-size: 22px; font-weight: 800; color: #0A66C2; margin-bottom: 0px; margin-top:-8px;">{{ $companyName }}</div>
+                                <div>{{ $companyAddress }}</div>
+                                <div>{{ $companyEmail }}</div>
+                                <div>{{ $companyPhone }}</div>
+                                @if(!empty($companyTaxId))
+                                <div style="font-weight: bold; color: #374151;">Tax ID: {{ $companyTaxId }}</div>
+                                @endif
+                            </div>
+                        </div>
+                    </td>
+                    <td style="width:40%; vertical-align:top; text-align:right; padding:0;">
+                        <div style="display:flex; align-items:flex-start; gap:0px;">
+                            <div style="font-size: 28px; font-weight: 900; color: #0A66C2; letter-spacing: 2px; margin-bottom: 0px;">RECEIPT</div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                                <div style="font-weight:700; font-size:15px; color:#374151;">Receipt #: {{ $userGeneratedReceiptId ?? $receiptId }}</div>
+                                <div style="font-weight:700; font-size:14px; color:#374151;">Date: {{ \Carbon\Carbon::parse($receiptDate ?? $updated_at)->format('d M, Y') }}</div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            </table>
         </div>
 
-        <!-- Customer & Paid Amount -->
-        <div class="info-section">
-            <div class="customer-info">
-                <h2>{{ $customerName }}</h2>
-                @if($customerAddress)
-                    <div class="customer-address">{{ $customerAddress }}</div>
-                @endif
-                @if($customerEmail)
-                    <p>{{ $customerEmail }}</p>
-                @endif
-                @if($customerPhone)
-                    <p>{{ $customerPhone }}</p>
-                @endif
-            </div>
-            <div class="amount-info">
-                <p class="total">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
-                <p class="balance-label">Amount Paid</p>
-                <p class="balance-due">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
-            </div>
-        </div>
+        <table style="width:100%; border:none; border-collapse:collapse; margin-bottom:16px;">
+            <tr>
+                <td style="width:60%; vertical-align:top; padding:0;">
+                    <div class="customer-info">
+                        <h1 style="font-size:22px; font-weight:bold; margin:0 0 2px 0;">{{ $projectName }}</h1>
+                        <p class="customer-label" style="font-weight:600; color:#374151; margin-top:2px; font-size:14px;">Received From:</p>
+                        <p style="font-weight:600; font-size:15px; color:#111827; margin:1px 0;">{{ $customerName }}</p>
+                        @if($customerAddress)
+                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerAddress }}</p>
+                        @endif
+                        @if($customerEmail)
+                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerEmail }}</p>
+                        @endif
+                        @if($customerPhone)
+                            <p class="customer-details" style="font-size:12px; color:#6B7280; margin-top:1px; white-space:pre-line;">{{ $customerPhone }}</p>
+                        @endif
+                    </div>
+                </td>
+                <td style="width:40%; vertical-align:top; text-align:right; padding:0;">
+                    <div class="amount-info" style="text-align:right; min-width:150px; margin-top:2px;">
+                        <p class="total" style="font-size:24px; font-weight:bold; margin:0; color:#0A66C2;">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</p>
+                        <p class="balance-label" style="font-size:15px; color:#6B7280; margin:1px 0 0 0;">Amount Paid</p>
+                        <p class="balance-due" style="font-size:17px; font-weight:600; color:#0A66C2; margin:1px 0 0 0;">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
+                    </div>
+                </td>
+            </tr>
+        </table>
 
         <!-- Items Table -->
         <table>
@@ -362,12 +376,7 @@
                 </tr>
                 @endif
 
-                <tr class="total-row">
-                    <td colspan="3" class="text-right">Invoice Total</td>
-                    <td class="text-right amount">
-                        {{ $currencySymbol }} {{ number_format($totalAmount, 2) }}
-                    </td>
-                </tr>
+                // ...existing code...
 
                 <tr class="paid-row">
                     <td colspan="3" class="text-right">Amount Paid</td>

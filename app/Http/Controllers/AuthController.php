@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use App\Models\User;
 use App\Models\Doctors;
@@ -47,6 +48,136 @@ class AuthController extends Controller
     {
         $users = User::all();
         return response()->json($users);
+    }
+
+    private function attachReferralAtSignup(User $user, ?string $referralCode, Request $request): void
+    {
+        $code = strtoupper(trim((string) $referralCode));
+        if ($code === '') {
+            return;
+        }
+
+        $refCode = DB::table('referral_codes')->where('code', $code)->first();
+        if (!$refCode) {
+            return;
+        }
+
+        if ((string) $refCode->owner_user_id === (string) $user->id) {
+            return;
+        }
+
+        DB::table('users')
+            ->where('id', (string) $user->id)
+            ->update([
+                'referred_by_code' => (string) $refCode->code,
+                'referred_by_user_id' => (string) $refCode->owner_user_id,
+                'referral_attributed_at' => now(),
+            ]);
+
+        $alreadyRedeemed = DB::table('referral_events')
+            ->where('event_type', 'signup')
+            ->where('referred_user_id', (string) $user->id)
+            ->exists();
+
+        if ($alreadyRedeemed) {
+            return;
+        }
+
+        DB::table('referral_events')->insert([
+            'id' => (string) Str::uuid(),
+            'referral_code_id' => (string) $refCode->id,
+            'referral_code' => (string) $refCode->code,
+            'event_type' => 'signup',
+            'referred_user_id' => (string) $user->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 255),
+            'payload' => json_encode(new \stdClass()),
+            'created_at' => now(),
+        ]);
+
+        DB::table('referral_codes')->where('id', (string) $refCode->id)->increment('uses_count');
+    }
+
+    private function issueReferralRewardForActiveVerifiedUser(User $user): void
+    {
+        $isActive = strtolower((string) ($user->status ?? '')) === 'active';
+        $isVerified = !empty($user->email_verified_at);
+
+        if (!$isActive || !$isVerified) {
+            return;
+        }
+
+        if (empty($user->referred_by_user_id) || empty($user->referred_by_code)) {
+            return;
+        }
+
+        $refCode = DB::table('referral_codes')
+            ->select(['id', 'owner_user_id', 'code'])
+            ->where('code', (string) $user->referred_by_code)
+            ->first();
+
+        if (!$refCode || (string) $refCode->owner_user_id !== (string) $user->referred_by_user_id) {
+            return;
+        }
+
+        $alreadyIssued = DB::table('referral_rewards')
+            ->where('referrer_user_id', (string) $refCode->owner_user_id)
+            ->where('referred_user_id', (string) $user->id)
+            ->where('status', 'issued')
+            ->exists();
+
+        if ($alreadyIssued) {
+            return;
+        }
+
+        $rewardCurrency = $this->resolveReferrerRewardCurrency((string) $refCode->owner_user_id);
+        $rewardAmount = $this->resolveRewardAmountForCurrency($rewardCurrency);
+
+        DB::table('referral_rewards')->insert([
+            'id' => (string) Str::uuid(),
+            'referral_code_id' => (string) $refCode->id,
+            'referrer_user_id' => (string) $refCode->owner_user_id,
+            'referred_user_id' => (string) $user->id,
+            'reward_type' => 'credit',
+            'reward_amount' => $rewardAmount,
+            'reward_currency' => $rewardCurrency,
+            'status' => 'issued',
+            'reason' => 'issued on active + verified user',
+            'metadata' => json_encode(['trigger' => 'setup_password_active']),
+            'created_at' => now(),
+            'issued_at' => now(),
+            'reversed_at' => null,
+        ]);
+    }
+
+    private function resolveReferrerRewardCurrency(string $referrerUserId): string
+    {
+        $currencyCode = DB::table('tenants as t')
+            ->leftJoin('currencies as c', 'c.currencyId', '=', 't.currency')
+            ->where('t.ownerId', $referrerUserId)
+            ->where('t.isDefault', 1)
+            ->value('c.currencyCode');
+
+        $fallback = strtoupper((string) env('REFERRAL_SIGNUP_REWARD_CURRENCY', 'NGN'));
+        $resolved = strtoupper(trim((string) ($currencyCode ?? '')));
+
+        return $resolved !== '' ? $resolved : $fallback;
+    }
+
+    private function resolveRewardAmountForCurrency(string $currencyCode): float
+    {
+        $normalizedCurrency = strtoupper(trim($currencyCode));
+        $defaultAmount = (float) env('REFERRAL_SIGNUP_REWARD_NGN', 1000);
+        if ($normalizedCurrency === '') {
+            return $defaultAmount;
+        }
+
+        $currencyAmount = env('REFERRAL_SIGNUP_REWARD_' . $normalizedCurrency);
+        if ($currencyAmount === null || $currencyAmount === '') {
+            return $defaultAmount;
+        }
+
+        return (float) $currencyAmount;
     }
 
 
@@ -423,6 +554,7 @@ public function signin(Request $request)
             'email' => 'required|email|unique:users,email|max:255',
             'currencyId' => 'required|integer|exists:currencies,currencyId',
             'companyName' => 'nullable|string|max:255',
+            'referralCode' => 'nullable|string|min:4|max:32',
             // 'role' => 'required|integer|exists:roles,roleId',
         ]);
 
@@ -472,6 +604,12 @@ $user = User::create([
     // 'company' => $validated['companyName'],
 ]);
 
+        try {
+            $this->attachReferralAtSignup($user, $request->input('referralCode'), $request);
+        } catch (\Throwable $e) {
+            Log::warning('Referral attribution on signup failed: ' . $e->getMessage());
+        }
+
         $company = Tenant::create([
         'tenantName' => $validated['companyName'],
         'currency' => $validated['currencyId'],
@@ -505,6 +643,9 @@ $user = User::create([
         return response()->json([
             'status' => 'success',
             'message' => 'Signup successful! Please check your email for the verification code.',
+            'user' => [
+                'id' => $user->id,
+            ],
         ], 201);
 
     } catch (ValidationException $e) {
@@ -559,6 +700,13 @@ public function setupPassword(Request $request)
             'otp_code' => null,
             'otp_expires_at' => null,
         ]);
+
+        try {
+            $user->refresh();
+            $this->issueReferralRewardForActiveVerifiedUser($user);
+        } catch (\Throwable $e) {
+            Log::warning('Referral reward issuance on setup-password failed: ' . $e->getMessage());
+        }
 
         // Send welcome email
         try {

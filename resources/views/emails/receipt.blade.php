@@ -6,20 +6,19 @@
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; }
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header {
-            background-color: #0A66C2; /* Blue theme for receipts */
-            color: white;
-            padding: 20px;
-            text-align: center;
-        }
+        .logo { background-color: #ffffff; padding: 18px 0; text-align: center; border-radius:8px 8px 0 0; border-bottom:1px solid #e6eef9; }
+        .logo img{ max-width:150px; display:block; margin:0 auto; }
+        .header { background-color: #ffffff; color: #0A66C2; padding: 4px 20px; text-align: center; border-bottom:1px solid #e6eef9; }
+        .header h1{ margin:0; font-size:20px; color:#0A66C2; }
         .content { padding: 20px; background-color: #f9fafb; }
         .footer { margin-top: 20px; padding: 10px; text-align: center; color: #666; font-size: 12px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <img src="https://app.clickinvoice.app/images/logo/logo-dark.png" alt="Company Logo" style="max-width: 150px; display: block; margin: 0 auto 10px;">
-
+        <div class="logo">
+            <img src="{{ $logoCid ?? 'https://app.clickinvoice.app/images/logo/logo.svg' }}" alt="ClickInvoice" width="140" style="display:block;margin:0 auto;" />
+        </div>
         <div class="header">
             <h1>Payment Receipt</h1>
         </div>

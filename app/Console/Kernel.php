@@ -29,6 +29,6 @@ class Kernel extends ConsoleKernel
         
     }
     protected $commands = [
-    // \App\Console\Commands\CloseInactiveTickets::class,
-];
+        \App\Console\Commands\Serve::class,
+    ];
 }

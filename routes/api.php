@@ -53,6 +53,9 @@ use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\SupportController;
 use App\Http\Controllers\PlansController;
 use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\ReferralController;
+use App\Http\Controllers\AdminLoginActivityController;
+use App\Http\Controllers\InAppNotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -79,6 +82,31 @@ Route::get('/users/profile', [AuthController::class, 'profile'])->middleware('au
 Route::get('/roles', [RolesController::class, 'index']);
 Route::post('/forgot-password', [ForgotPasswordController::class, 'sendResetLink']);
 Route::post('/reset-password', [ResetPasswordController::class, 'reset'])->name('api.password.reset');
+
+Route::get('/referrals/resolve', [ReferralController::class, 'resolve']);
+Route::post('/referrals/redeem', [ReferralController::class, 'redeem']);
+Route::get('/referrals/current-owner', [ReferralController::class, 'currentOwner']);
+Route::get('/referrals/admin-overview', [ReferralController::class, 'adminOverview']);
+Route::get('/referrals/payout-ready', [ReferralController::class, 'payoutReady']);
+Route::get('/referrals/exchange-rates', [ReferralController::class, 'exchangeRates']);
+Route::get('/referrals/reward-settings', [ReferralController::class, 'rewardSettings']);
+Route::patch('/referrals/reward-settings', [ReferralController::class, 'updateRewardSettings']);
+Route::get('/referrals/withdrawals', [ReferralController::class, 'withdrawals']);
+Route::post('/referrals/withdrawals', [ReferralController::class, 'requestWithdrawal']);
+Route::patch('/referrals/withdrawals', [ReferralController::class, 'updateWithdrawal']);
+
+Route::get('/notifications', [InAppNotificationController::class, 'index']);
+Route::post('/notifications', [InAppNotificationController::class, 'store']);
+Route::patch('/notifications', [InAppNotificationController::class, 'update']);
+Route::delete('/notifications', [InAppNotificationController::class, 'destroy']);
+
+Route::post('/admin/login-activity', [AdminLoginActivityController::class, 'store']);
+Route::get('/admin/login-activity', [AdminLoginActivityController::class, 'index']);
+
+Route::middleware(['auth.jwt'])->group(function () {
+    Route::post('/referrals/generate', [ReferralController::class, 'generate']);
+    Route::get('/referrals/me', [ReferralController::class, 'me']);
+});
 
 Route::get('/currencies', function(){
     $currencies = Currency::orderBy('currencyId')->get()->makeHidden([ 'created_at', 'updated_at', 'deleted_at']);
@@ -296,6 +324,7 @@ Route::get('/plans', function () {
      Route::put('/subscriptions/{planId}/cancel', [SubscriptionController::class, 'cancel']); // Add auth
     Route::patch('/subscriptions/{subscriptionId}/activate', [SubscriptionController::class, 'activate']);
     Route::patch('/subscriptions/{subscriptionId}/deactivate', [SubscriptionController::class, 'deactivate']);
+    Route::patch('/subscriptions/{subscriptionId}/expire', [SubscriptionController::class, 'expire']);
 
     Route::get('/users/{id}/profile', [UsersController::class, 'profile']);
 

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class OtpController extends Controller
@@ -123,6 +124,45 @@ class OtpController extends Controller
             'email_verified_at' => Carbon::now(),
             // Don't clear OTP yet - we'll do that after password setup
         ]);
+
+        try {
+            $isActive = strtolower((string) ($user->status ?? '')) === 'active';
+            if ($isActive && !empty($user->referred_by_user_id) && !empty($user->referred_by_code)) {
+                $refCode = DB::table('referral_codes')
+                    ->select(['id', 'owner_user_id', 'code'])
+                    ->where('code', (string) $user->referred_by_code)
+                    ->first();
+
+                if ($refCode && (string) $refCode->owner_user_id === (string) $user->referred_by_user_id) {
+                    $alreadyIssued = DB::table('referral_rewards')
+                        ->where('referrer_user_id', (string) $refCode->owner_user_id)
+                        ->where('referred_user_id', (string) $user->id)
+                        ->where('status', 'issued')
+                        ->exists();
+
+                    if (!$alreadyIssued) {
+                        $rewardAmount = (float) env('REFERRAL_SIGNUP_REWARD_NGN', 1000);
+                        DB::table('referral_rewards')->insert([
+                            'id' => (string) Str::uuid(),
+                            'referral_code_id' => (string) $refCode->id,
+                            'referrer_user_id' => (string) $refCode->owner_user_id,
+                            'referred_user_id' => (string) $user->id,
+                            'reward_type' => 'credit',
+                            'reward_amount' => $rewardAmount,
+                            'reward_currency' => 'NGN',
+                            'status' => 'issued',
+                            'reason' => 'issued on active + verified signup',
+                            'metadata' => json_encode(['trigger' => 'otp_verified']),
+                            'created_at' => now(),
+                            'issued_at' => now(),
+                            'reversed_at' => null,
+                        ]);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Referral reward issuance after OTP verify failed: ' . $e->getMessage());
+        }
 
         return response()->json([
             'status' => 'success',
