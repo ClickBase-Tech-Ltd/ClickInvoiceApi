@@ -38,72 +38,119 @@ class SubscriptionController extends Controller
 
     public function create(Request $request, $planId)
     {
-        $user = auth()->user(); // Or however you get authenticated user
-        $plan = Plans::with('currency_detail')->where('planId', $planId)->first();
+        $user = auth()->user();
 
-        if (!$plan->flutterwavePlanId) {
-            return response()->json(['error' => 'Invalid plan'], 400);
+        // --- Guard: plan must exist ---
+        $plan = Plans::with('currency_detail')->where('planId', $planId)->first();
+        if (!$plan) {
+            return response()->json(['error' => 'Plan not found'], 404);
         }
 
-        // Check if user already has active subscription
+        // --- Guard: plan must have a Flutterwave plan ID configured ---
+        if (!$plan->flutterwavePlanId) {
+            return response()->json(['error' => 'This plan is not configured for online payment. Please contact support.'], 400);
+        }
+
+        // --- Guard: currency relation must be loaded ---
+        if (!$plan->currency_detail) {
+            Log::error('Plan currency_detail missing', ['planId' => $planId]);
+            return response()->json(['error' => 'Plan currency is not configured. Please contact support.'], 500);
+        }
+
+        // --- Guard: Flutterwave key must be set ---
+        $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+        if (!$secretKey) {
+            Log::error('FLUTTERWAVE_SECRET_KEY is not set in .env');
+            return response()->json(['error' => 'Payment gateway not configured. Please contact support.'], 500);
+        }
+
+        // --- Guard: duplicate active subscription on same plan ---
         $existingSub = $user->subscription;
         if ($existingSub && $existingSub->status === 'active' && $existingSub->planId == $plan->planId) {
             return response()->json(['error' => 'You already have an active subscription on this plan'], 400);
         }
 
-        // Create pending subscription record
+        // Create a pending subscription record to track this checkout attempt
         $subscription = Subscription::create([
-            'userId' => $user->id,
-            'planId' => $plan->planId,
-            'flutterwaveSubscriptionId' => $plan->flutterwaveSubscriptionId,
-            'status' => 'pending',
+            'userId'                    => $user->id,
+            'planId'                    => $plan->planId,
+            'flutterwaveSubscriptionId' => $plan->flutterwaveSubscriptionId ?? null,
+            'status'                    => 'pending',
         ]);
 
         $txRef = 'sub-' . $subscription->subscriptionId . '-' . time();
 
-      
-        // Initiate payment on Flutterwave
-        // Hardcode for testing; remove in production
-$ngrokUrl = 'https://otiosely-chronological-cari.ngrok-free.dev'; // Your ngrok URL
-// 'redirect_url' => $ngrokUrl . '/subscription/redirect',
-        $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+        // Build customer name from firstName/lastName fields
+        $customerName = trim(($user->firstName ?? '') . ' ' . ($user->lastName ?? ''));
+        if ($customerName === '') {
+            $customerName = $user->email;
+        }
+
+        // Redirect back to the frontend subscriptions page after payment
+        $frontendRedirect = rtrim(env('FRONTEND_URL', 'https://app.clickinvoice.app'), '/')
+            . '/dashboard/my-subscriptions';
+
+        // Call Flutterwave Payments API
         $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
             ->post('https://api.flutterwave.com/v3/payments', [
-                'tx_ref' => $txRef,
-                'amount' => $plan->price, // Overridden by plan, but include for initial charge
-                'currency' => $plan->currency_detail->currencyCode,
-                'interval' => 'monthly',
-                'payment_plan' => $plan->flutterwavePlanId, // Enables subscription
-                // 'redirect_url' => url('/subscription/redirect'), // Your frontend or backend redirect handler
-                'redirect_url' => env('APP_URL') . '/api/subscription/verify-redirect',
-                'customer' => [
+                'tx_ref'       => $txRef,
+                'amount'       => $plan->price,
+                'currency'     => $plan->currency_detail->currencyCode,
+                'payment_plan' => $plan->flutterwavePlanId,
+                'redirect_url' => $frontendRedirect,
+                'customer'     => [
                     'email' => $user->email,
-                    'name' => $user->name,
+                    'name'  => $customerName,
                 ],
                 'customizations' => [
-                    'title' => 'ClickInvoice ' . $plan->planName . ' Subscription',
-                    'description' => 'Subscribe to ' . $plan->planName,
+                    'title'       => 'ClickInvoice – ' . $plan->planName,
+                    'description' => $plan->planName . ' monthly subscription',
+                    'logo'        => 'https://app.clickinvoice.app/icons/icon-192x192.png',
                 ],
                 'meta' => [
-                    'subscriptionId' => $subscription->subscriptionId, // For webhook
+                    'subscriptionId' => $subscription->subscriptionId,
+                    'userId'         => $user->id,
                 ],
             ]);
 
         if ($response->successful()) {
-              $payment = Payment::create([
-            'subscriptionId' => $subscription->subscriptionId,
-            'amount' => $plan->price,
-            'currency' => $plan->currency_detail->currencyCode,
-            'status' => 'pending',
-            'flutterwaveTxRef' => $txRef,
-            // 'flutterwaveTxId' =>  $response->json()['data']['id'],
-            'userId' => $user->id,
-        ]);
-            $link = $response->json()['data']['link'];
+            $responseData = $response->json();
+            $link = $responseData['data']['link'] ?? null;
+
+            if (!$link) {
+                $subscription->delete();
+                Log::error('Flutterwave returned success but no payment link', ['response' => $responseData]);
+                return response()->json(['error' => 'Payment gateway did not return a payment link.'], 500);
+            }
+
+            // Record the pending payment
+            Payment::create([
+                'subscriptionId'   => $subscription->subscriptionId,
+                'amount'           => $plan->price,
+                'currency'         => $plan->currency_detail->currencyCode,
+                'status'           => 'pending',
+                'flutterwaveTxRef' => $txRef,
+                'userId'           => $user->id,
+            ]);
+
             return response()->json(['payment_link' => $link]);
         } else {
-            $subscription->delete(); // Cleanup
-            return response()->json(['error' => 'Failed to initiate payment'], 500);
+            $subscription->delete();
+
+            $flwError = $response->json();
+            Log::error('Flutterwave payment initiation failed', [
+                'status'   => $response->status(),
+                'response' => $flwError,
+                'planId'   => $planId,
+                'userId'   => $user->id,
+            ]);
+
+            $message = $flwError['message'] ?? ($flwError['error'] ?? 'Failed to initiate payment with Flutterwave.');
+
+            return response()->json([
+                'error'   => $message,
+                'details' => $flwError,
+            ], 502);
         }
     }
 
