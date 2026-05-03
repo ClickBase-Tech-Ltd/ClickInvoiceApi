@@ -356,4 +356,3 @@ public function activate(Request $request, $subscriptionId)
         ]);
     }
 }
-

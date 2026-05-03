@@ -344,7 +344,11 @@
                 <td style="width:40%; vertical-align:top; text-align:right; padding:0;">
                     <div class="amount-info" style="text-align:right; min-width:150px; margin-top:2px;">
                         <p class="total" style="font-size:24px; font-weight:bold; margin:0; color:#0A66C2;">{{ $currencySymbol }} {{ number_format($totalAmount, 2) }}</p>
-                        <p class="balance-label" style="font-size:15px; color:#6B7280; margin:1px 0 0 0;">Balance Due</p>
+                        @if($amountPaid > 0)
+                        <p class="amount-paid-label" style="font-size:15px; color:#6B7280; margin:2px 0 0 0;">Amount Paid</p>
+                        <p class="amount-paid" style="font-size:17px; font-weight:600; color:#10B981; margin:1px 0 0 0;">{{ $currencySymbol }} {{ number_format($amountPaid, 2) }}</p>
+                        @endif
+                        <p class="balance-label" style="font-size:15px; color:#6B7280; margin:2px 0 0 0;">Balance Due</p>
                         <p class="balance-due" style="font-size:17px; font-weight:600; color:#dc2626; margin:1px 0 0 0;">{{ $currencySymbol }} {{ number_format($balanceDue, 2) }}</p>
                     </div>
                 </td>
