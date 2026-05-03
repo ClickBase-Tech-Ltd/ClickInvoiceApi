@@ -259,6 +259,15 @@
 </head>
 <body>
 
+    @if(($invoice->voided_at ?? null) || strtoupper((string) ($status ?? '')) === 'VOID')
+    <div style="background:#fef2f2;border:2px solid #dc2626;color:#991b1b;padding:12px;text-align:center;font-weight:bold;font-size:14px;margin:0 auto 12px auto;max-width:800px;border-radius:8px;">
+        VOID — This document is cancelled.
+        @if($invoice->void_reason ?? null)
+            <div style="font-weight:normal;font-size:11px;margin-top:6px;">Reason: {{ $invoice->void_reason }}</div>
+        @endif
+    </div>
+    @endif
+
     <div class="container">
 
         <div class="header-invoice" style="position:relative; background: #fff; box-shadow: 0 2px 12px #e5e7eb; border-radius: 12px; padding: 0; margin-top: -8px; margin-bottom: 10px;">

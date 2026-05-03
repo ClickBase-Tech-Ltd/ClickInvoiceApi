@@ -9,9 +9,35 @@ use App\Models\Tenant;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Models\InvoiceAuditEvent;
+use App\Services\InvoiceAuthorizationService;
+use App\Services\InvoiceTotalsService;
+use App\Services\InvoiceSupervisorOtpService;
 
 class InvoiceController extends Controller
 {
+    public function __construct(
+        protected InvoiceAuthorizationService $invoiceAuth,
+        protected InvoiceTotalsService $invoiceTotals,
+        protected InvoiceSupervisorOtpService $supervisorOtp,
+    ) {}
+
+    protected function recordInvoiceAudit(
+        Invoice $invoice,
+        string $action,
+        ?string $reason,
+        ?array $payload = null
+    ): void {
+        InvoiceAuditEvent::create([
+            'invoice_id' => $invoice->invoiceId,
+            'tenant_id' => $invoice->tenantId,
+            'actor_user_id' => Auth::id(),
+            'action' => $action,
+            'reason' => $reason,
+            'payload' => $payload,
+        ]);
+    }
+
     /**
      * Store a new invoice with items, optional tax, and amountPaid.
      */
@@ -145,13 +171,16 @@ class InvoiceController extends Controller
     {
         $tenantId = $request->header('X-Tenant-ID');
         $userId = Auth::id();
+        $user = Auth::user();
 
-        $invoices = Invoice::with('items', 'currencyDetail', 'customer')
-            ->where('createdBy', $userId)
-            ->where('tenantId', $tenantId)
-            ->get();
+        $q = Invoice::with('items', 'currencyDetail', 'customer')
+            ->where('tenantId', $tenantId);
 
-        return response()->json($invoices);
+        if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+            $q->where('createdBy', $userId);
+        }
+
+        return response()->json($q->orderByDesc('updated_at')->get());
     }
 
 
@@ -159,21 +188,27 @@ class InvoiceController extends Controller
     {
         $tenantId = $request->header('X-Tenant-ID');
         $userId = Auth::id();
+        $user = Auth::user();
 
-        $invoices = Invoice::with('items', 'currencyDetail', 'customer')
-            ->where('createdBy', $userId)
+        $q = Invoice::with('items', 'currencyDetail', 'customer')
             ->where('tenantId', $tenantId)
-            ->where('status', 'PAID')
-            ->orWhere('status', 'PARTIAL_PAYMENT')
-            ->get();
+            ->where(function ($query) {
+                $query->where('status', 'PAID')
+                    ->orWhere('status', 'PARTIAL_PAYMENT');
+            });
 
-        return response()->json($invoices);
+        if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+            $q->where('createdBy', $userId);
+        }
+
+        return response()->json($q->get());
     }
 
      public function getLast5UserInvoices(Request $request)
 {
     $tenantId = $request->header('X-Tenant-ID');
     $userId = Auth::id();
+    $user = Auth::user();
 
     if (!$tenantId) {
         return response()->json([
@@ -181,14 +216,18 @@ class InvoiceController extends Controller
         ], 400);
     }
 
-    $invoices = Invoice::with([
+    $q = Invoice::with([
             'items',
             'currencyDetail',
             'customer',
         ])
-        ->where('createdBy', $userId)
-        ->where('tenantId', $tenantId)
-        ->latest()   // orders by created_at desc
+        ->where('tenantId', $tenantId);
+
+    if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+        $q->where('createdBy', $userId);
+    }
+
+    $invoices = $q->latest()
         ->limit(5)
         ->get();
 
@@ -337,15 +376,22 @@ public function adminInvoiceSummary(Request $request)
 public function getInvoiceByInvoiceId(Request $request, $invoiceId)
     {
         $tenantId = $request->header('X-Tenant-ID');
-        $userId = Auth::id();
+        $user = Auth::user();
 
         $invoice = Invoice::with('items', 'currencyDetail', 'tenant', 'customer', 'creator')
-            ->where('createdBy', $userId)
             ->where('invoiceId', $invoiceId)
             ->where('tenantId', $tenantId)
-            ->get();
+            ->first();
 
-        return response()->json($invoice);
+        if (! $invoice) {
+            return response()->json(['message' => 'Invoice not found'], 404);
+        }
+
+        if (! $this->invoiceAuth->canAccessTenantInvoice($user, $invoice, $tenantId)) {
+            return response()->json(['message' => 'You do not have access to this invoice'], 403);
+        }
+
+        return response()->json([$invoice]);
     }
 
 
@@ -366,29 +412,39 @@ public function getInvoiceByInvoiceId(Request $request, $invoiceId)
     public function getReceiptByReceiptId(Request $request, $receiptId)
     {
         $tenantId = $request->header('X-Tenant-ID');
-        $userId = Auth::id();
+        $user = Auth::user();
 
         $invoice = Invoice::with('items', 'currencyDetail', 'tenant', 'customer', 'creator')
-            ->where('createdBy', $userId)
             ->where('receiptId', $receiptId)
             ->where('tenantId', $tenantId)
-            ->get();
+            ->first();
 
-        return response()->json($invoice);
+        if (! $invoice) {
+            return response()->json(['message' => 'Receipt not found'], 404);
+        }
+
+        if (! $this->invoiceAuth->canAccessTenantInvoice($user, $invoice, $tenantId)) {
+            return response()->json(['message' => 'You do not have access to this receipt'], 403);
+        }
+
+        return response()->json([$invoice]);
     }
 
 public function getInvoiceAndReceiptsByCustomerId(Request $request, $customerId)
     {
         $tenantId = $request->header('X-Tenant-ID');
         $userId = Auth::id();
+        $user = Auth::user();
 
-        $invoice = Invoice::with('items', 'currencyDetail', 'tenant', 'customer')
-            ->where('createdBy', $userId)
+        $q = Invoice::with('items', 'currencyDetail', 'tenant', 'customer')
             ->where('customerId', $customerId)
-            ->where('tenantId', $tenantId)
-            ->get();
+            ->where('tenantId', $tenantId);
 
-        return response()->json($invoice);
+        if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+            $q->where('createdBy', $userId);
+        }
+
+        return response()->json($q->get());
     }
 
 
@@ -411,15 +467,18 @@ public function getInvoiceAndReceiptsByCustomerId(Request $request, $customerId)
     {
         $tenantId = $request->header('X-Tenant-ID');
         $userId = Auth::id();
+        $user = Auth::user();
 
-        $invoices = Invoice::with('items', 'currencyDetail', 'tenant', 'customer')
-            ->where('createdBy', $userId)
+        $q = Invoice::with('items', 'currencyDetail', 'tenant', 'customer')
             ->where('customerId', $customerId)
             ->where('status', 'UNPAID')
-            ->where('tenantId', $tenantId)
-            ->get();
+            ->where('tenantId', $tenantId);
 
-        return response()->json($invoices);
+        if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+            $q->where('createdBy', $userId);
+        }
+
+        return response()->json($q->get());
     }
 
 
@@ -427,15 +486,18 @@ public function getReceiptsForCustomer(Request $request, $customerId)
 {
     $tenantId = $request->header('X-Tenant-ID');
     $userId = Auth::id();
+    $user = Auth::user();
 
-    $receipts = Invoice::with(['items', 'currencyDetail', 'tenant', 'customer'])
-        ->where('createdBy', $userId)
+    $q = Invoice::with(['items', 'currencyDetail', 'tenant', 'customer'])
         ->where('customerId', $customerId)
         ->whereIn('status', ['PAID', 'PARTIAL_PAYMENT'])
-        ->where('tenantId', $tenantId)
-        ->get();
+        ->where('tenantId', $tenantId);
 
-    return response()->json($receipts);
+    if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
+        $q->where('createdBy', $userId);
+    }
+
+    return response()->json($q->get());
 }
 
 
@@ -510,12 +572,24 @@ public function updateInvoiceStatus(Request $request, $invoiceId)
         ], 404);
     }
 
+    if ($invoice->voided_at || strtoupper((string) $invoice->status) === 'VOID') {
+        return response()->json([
+            'message' => 'This invoice is void and cannot be updated.'
+        ], 422);
+    }
+
     $validated = $request->validate([
         'status' => 'required|string',
         'amountPaid' => 'nullable|numeric|min:0'
     ]);
 
     $status = strtoupper($validated['status']);
+
+    if ($status === 'VOID') {
+        return response()->json([
+            'message' => 'Use POST /invoices/{invoiceId}/void with a reason to void an invoice.',
+        ], 422);
+    }
 
     /**
      * Generate receipt ID ONLY if:
@@ -571,6 +645,210 @@ public function updateInvoiceStatus(Request $request, $invoiceId)
         'invoice' => $invoice
     ]);
 }
+
+    public function invoiceCapabilities(Request $request, string $invoiceId)
+    {
+        $tenantId = $request->header('X-Tenant-ID');
+        $user = Auth::user();
+
+        if (! $tenantId) {
+            return response()->json(['message' => 'Tenant ID is missing'], 400);
+        }
+
+        $invoice = Invoice::where('invoiceId', $invoiceId)
+            ->where('tenantId', $tenantId)
+            ->first();
+
+        if (! $invoice) {
+            return response()->json(['message' => 'Invoice not found'], 404);
+        }
+
+        if (! $this->invoiceAuth->canAccessTenantInvoice($user, $invoice, $tenantId)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $tenant = Tenant::where('tenantId', $tenantId)->first();
+        $canVoid = $this->invoiceAuth->canVoidInvoice($user, $invoice, $tenantId);
+        $canAmend = $this->invoiceAuth->canAmendInvoiceItems($user, $invoice, $tenantId);
+        $needsOwnerOtp = $tenant
+            && $this->invoiceAuth->tenantHasOwnerForSupervisoryOtp($tenant)
+            && ($canVoid || $canAmend);
+
+        return response()->json([
+            'canVoid' => $canVoid,
+            'canAmendItems' => $canAmend,
+            'isVoid' => (bool) $invoice->voided_at || strtoupper((string) $invoice->status) === 'VOID',
+            'isTenantSupervisor' => $this->invoiceAuth->isTenantSupervisor($user, $tenantId),
+            'requiresOwnerOtp' => $needsOwnerOtp,
+            'isTenantOwner' => $tenant ? $this->invoiceAuth->isTenantOwner($user, $tenant) : false,
+        ]);
+    }
+
+    public function voidInvoice(Request $request, string $invoiceId)
+    {
+        $tenantId = $request->header('X-Tenant-ID');
+        $user = Auth::user();
+
+        if (! $tenantId) {
+            return response()->json(['message' => 'Tenant ID is missing'], 400);
+        }
+
+        $invoice = Invoice::with('items')->where('invoiceId', $invoiceId)->where('tenantId', $tenantId)->first();
+
+        if (! $invoice) {
+            return response()->json(['message' => 'Invoice not found'], 404);
+        }
+
+        if (! $this->invoiceAuth->canVoidInvoice($user, $invoice, $tenantId)) {
+            return response()->json([
+                'message' => 'You cannot void this invoice (wrong tenant, insufficient permission, or invoice is not eligible). Only unpaid or overdue invoices can be voided.',
+            ], 403);
+        }
+
+        $tenant = Tenant::where('tenantId', $tenantId)->first();
+        if (! $tenant || ! $this->invoiceAuth->tenantHasOwnerForSupervisoryOtp($tenant)) {
+            return response()->json([
+                'message' => 'A business owner must be on file before voiding invoices. Assign an owner to this tenant, then request an approval code.',
+            ], 422);
+        }
+
+        $request->validate(['supervisor_action_token' => 'required|string']);
+        try {
+            $this->supervisorOtp->assertValidToken(
+                $request->input('supervisor_action_token'),
+                $tenantId,
+                (int) $user->id,
+                $invoice->invoiceId
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|max:2000',
+        ]);
+
+        $priorStatus = (string) $invoice->status;
+
+        $invoice->status = 'VOID';
+        $invoice->voided_at = now();
+        $invoice->void_reason = $validated['reason'];
+        $invoice->balanceDue = 0;
+        $invoice->save();
+
+        $this->recordInvoiceAudit($invoice, 'void', $validated['reason'], [
+            'prior_status' => $priorStatus,
+        ]);
+
+        $invoice->load(['items', 'currencyDetail', 'tenant', 'customer', 'creator']);
+
+        return response()->json([
+            'message' => 'Invoice voided successfully.',
+            'invoice' => $invoice,
+        ]);
+    }
+
+    public function amendInvoiceItems(Request $request, string $invoiceId)
+    {
+        $tenantId = $request->header('X-Tenant-ID');
+        $user = Auth::user();
+
+        if (! $tenantId) {
+            return response()->json(['message' => 'Tenant ID is missing'], 400);
+        }
+
+        $invoice = Invoice::with('items')->where('invoiceId', $invoiceId)->where('tenantId', $tenantId)->first();
+
+        if (! $invoice) {
+            return response()->json(['message' => 'Invoice not found'], 404);
+        }
+
+        if (! $this->invoiceAuth->canAmendInvoiceItems($user, $invoice, $tenantId)) {
+            return response()->json([
+                'message' => 'You cannot amend line items on this invoice (must be unpaid or overdue, not void, with supervisor or creator access).',
+            ], 403);
+        }
+
+        $tenant = Tenant::where('tenantId', $tenantId)->first();
+        if (! $tenant || ! $this->invoiceAuth->tenantHasOwnerForSupervisoryOtp($tenant)) {
+            return response()->json([
+                'message' => 'A business owner must be on file before editing invoice lines. Assign an owner to this tenant, then request an approval code.',
+            ], 422);
+        }
+
+        $request->validate(['supervisor_action_token' => 'required|string']);
+        try {
+            $this->supervisorOtp->assertValidToken(
+                $request->input('supervisor_action_token'),
+                $tenantId,
+                (int) $user->id,
+                $invoice->invoiceId
+            );
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'nullable|string|max:2000',
+            'items' => 'required|array|min:1',
+            'items.*.itemDescription' => 'required|string',
+            'items.*.amount' => 'required|numeric|min:0',
+            'items.*.quantity' => 'required|numeric|integer|min:1',
+        ]);
+
+        $prevItems = $invoice->items->map(fn ($i) => $i->only(['itemDescription', 'quantity', 'amount']))->all();
+
+        $invoice->items()->delete();
+
+        foreach ($validated['items'] as $item) {
+            $invoice->items()->create([
+                'itemDescription' => $item['itemDescription'],
+                'quantity' => (int) $item['quantity'],
+                'amount' => (float) $item['amount'],
+            ]);
+        }
+
+        $discountPercentage = (float) ($invoice->discountPercentage ?? 0);
+        $taxPercentage = (float) ($invoice->taxPercentage ?? 0);
+        $amountPaid = (float) ($invoice->amountPaid ?? 0);
+
+        $totals = $this->invoiceTotals->compute(
+            $validated['items'],
+            $discountPercentage,
+            $taxPercentage,
+            $amountPaid
+        );
+
+        $invoice->subtotal = $totals['subtotal'];
+        $invoice->discountAmount = $totals['discountAmount'];
+        $invoice->taxAmount = $totals['taxAmount'];
+        $invoice->totalAmount = $totals['totalAmount'];
+        $invoice->balanceDue = $totals['balanceDue'];
+
+        if ($amountPaid >= $totals['totalAmount']) {
+            $invoice->status = 'PAID';
+            $invoice->balanceDue = 0;
+        } elseif ($amountPaid > 0) {
+            $invoice->status = 'PARTIAL_PAYMENT';
+        } else {
+            $invoice->status = 'UNPAID';
+        }
+
+        $invoice->save();
+        $invoice->load('items');
+
+        $this->recordInvoiceAudit($invoice, 'amend_items', $validated['reason'] ?? null, [
+            'previous_items' => $prevItems,
+            'new_items' => $validated['items'],
+        ]);
+
+        $invoice->load(['items', 'currencyDetail', 'tenant', 'customer', 'creator']);
+
+        return response()->json([
+            'message' => 'Invoice line items updated.',
+            'invoice' => $invoice,
+        ]);
+    }
 
 //ANALYTICS DATA   /**
 public function invoiceStatusBreakdown()

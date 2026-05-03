@@ -14,5 +14,6 @@ class TenantStaff extends Model
         'tenantStaffId',
         'tenantId',
         'userId',
+        'role',
     ];
 }

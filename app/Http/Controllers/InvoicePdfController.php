@@ -72,6 +72,13 @@ public function sendEmail(Request $request, $id)
         ->where('invoiceId', $id)
         ->firstOrFail();
 
+    if ($invoice->voided_at || strtoupper((string) $invoice->status) === 'VOID') {
+        return response()->json([
+            'success' => false,
+            'message' => 'This invoice is void and cannot be emailed.',
+        ], 422);
+    }
+
     // Get customer's default email
     $customerEmail = $invoice->customer?->customerEmail;
 
@@ -136,15 +143,19 @@ public function sendEmail(Request $request, $id)
     }
 }
 
-
-
-
-    public function sendReceiptEmail(Request $request, $id)
+public function sendReceiptEmail(Request $request, $id)
 {
     // Find receipt by receiptId
     $receipt = Invoice::with(['items', 'currencyDetail', 'tenant', 'customer'])
         ->where('receiptId', $id)
         ->firstOrFail();
+
+    if ($receipt->voided_at || strtoupper((string) $receipt->status) === 'VOID') {
+        return response()->json([
+            'success' => false,
+            'message' => 'This receipt is void and cannot be emailed.',
+        ], 422);
+    }
 
     // Get customer's default email
     $customerEmail = $receipt->customer?->customerEmail;
@@ -246,4 +257,5 @@ public function sendEmail(Request $request, $id)
         ], 500);
     }
 }
+
 }

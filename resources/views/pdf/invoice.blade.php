@@ -280,6 +280,15 @@
 </head>
 <body>
 
+    @if(!empty($invoice->voided_at) || strtoupper((string) ($invoice->status ?? '')) === 'VOID')
+    <div style="background:#fef2f2;border:2px solid #dc2626;color:#991b1b;padding:12px;text-align:center;font-weight:bold;font-size:14px;margin:0 0 10px 0;border-radius:8px;">
+        VOID — This invoice is cancelled and is not payable.
+        @if(!empty($invoice->void_reason))
+            <div style="font-weight:normal;font-size:11px;margin-top:6px;">Reason: {{ $invoice->void_reason }}</div>
+        @endif
+    </div>
+    @endif
+
     @if((int) $current_plan === 1)
     <div class="watermark">
         <img src="/public/images/logo copy.svg" alt="ClickInvoice Logo" style="max-width: 400px; max-height: 180px; width: auto; height: auto; object-fit: contain; display: inline-block;">

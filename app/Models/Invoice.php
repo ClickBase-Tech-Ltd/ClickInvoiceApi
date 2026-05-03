@@ -33,8 +33,21 @@ class Invoice extends Model
         'createdBy',
         'customerId',
         'receiptId',
-        'discountPercentage'
+        'discountPercentage',
+        'subtotal',
+        'discountAmount',
+        'taxAmount',
+        'totalAmount',
+        'voided_at',
+        'void_reason',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'voided_at' => 'datetime',
+        ];
+    }
 
     // Relationships
     public function items()

@@ -40,9 +40,10 @@ class Tenant extends Model
 
 
 
-public function owner()
-{
-    return $this->belongsTo(User::class, 'id', 'ownerId');
+    public function owner()
+    {
+        return $this->belongsTo(User::class, 'ownerId', 'id');
+    }
 }
-}
+
 

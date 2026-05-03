@@ -42,6 +42,7 @@ use App\Http\Controllers\InstructorCourseController;
 use App\Http\Controllers\InstructorModuleController;
 use App\Http\Controllers\InstructorLessonController;
 use App\Http\Controllers\InvoiceController;
+use App\Http\Controllers\InvoiceSupervisorOtpController;
 use App\Http\Controllers\InvoicePdfController;
 use App\Http\Controllers\TenantsController;
 use App\Models\Currency;
@@ -289,6 +290,11 @@ Route::get('/plans', function () {
     Route::get('/invoices/{invoiceId}', [InvoiceController::class, 'getInvoiceByInvoiceId']);
     Route::get('/receipts/{receiptId}', [InvoiceController::class, 'getReceiptByReceiptId']);
     Route::patch('/invoices/{invoiceId}/status', [InvoiceController::class, 'updateInvoiceStatus']);
+    Route::get('/invoices/{invoiceId}/capabilities', [InvoiceController::class, 'invoiceCapabilities']);
+    Route::post('/invoices/{invoiceId}/void', [InvoiceController::class, 'voidInvoice']);
+    Route::patch('/invoices/{invoiceId}/items', [InvoiceController::class, 'amendInvoiceItems']);
+    Route::post('/invoices/{invoiceId}/supervisor-otp/request', [InvoiceSupervisorOtpController::class, 'requestOtp']);
+    Route::post('/invoices/{invoiceId}/supervisor-otp/verify', [InvoiceSupervisorOtpController::class, 'verifyOtp']);
 
     Route::get('/customers', [CustomerController::class, 'getTenantCustomers']);
     Route::get('/customers/{customerId}/invoices-and-receipt', [InvoiceController::class, 'getInvoiceAndReceiptsByCustomerId']);
