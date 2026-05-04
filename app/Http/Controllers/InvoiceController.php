@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Models\InvoiceAuditEvent;
@@ -114,7 +115,7 @@ class InvoiceController extends Controller
     // ────────────────────────────────────────────────
     // 6. Create main invoice record
     // ────────────────────────────────────────────────
-    $invoice = Invoice::create(array_merge(
+    $invoicePayload = array_merge(
         $request->only([
             'invoiceId',
             'userGeneratedInvoiceId',
@@ -130,19 +131,34 @@ class InvoiceController extends Controller
             'discountPercentage',
             'customerId'
         ]),
-        [
-            'subtotal'       => $subtotal,           // added - good for reporting / PDF
-            'discountAmount' => $discountAmount,     // added - optional but useful
-            'taxAmount'      => $taxAmount,          // added
-            'totalAmount'    => $totalAmount,
-            'amountPaid'     => $amountPaid,
-            'balanceDue'     => $balanceDue,
-            'tenantId'       => $tenantId,
-            'createdBy'      => auth()->id(),
-            'currency'       => $currency,
-            'status'         => $balanceDue >= $totalAmount ? 'UNPAID' : ($amountPaid > 0 ? 'PARTIAL' : 'PAID'),
-        ]
-    ));
+        []
+    );
+
+    // Backward compatibility: some environments may not yet have the
+    // new totals columns from the supervisory migration.
+    if (Schema::hasColumn('invoices', 'subtotal')) {
+        $invoicePayload['subtotal'] = $subtotal;
+    }
+    if (Schema::hasColumn('invoices', 'discountAmount')) {
+        $invoicePayload['discountAmount'] = $discountAmount;
+    }
+    if (Schema::hasColumn('invoices', 'taxAmount')) {
+        $invoicePayload['taxAmount'] = $taxAmount;
+    }
+    if (Schema::hasColumn('invoices', 'totalAmount')) {
+        $invoicePayload['totalAmount'] = $totalAmount;
+    }
+
+    $invoicePayload = array_merge($invoicePayload, [
+        'amountPaid'     => $amountPaid,
+        'balanceDue'     => $balanceDue,
+        'tenantId'       => $tenantId,
+        'createdBy'      => auth()->id(),
+        'currency'       => $currency,
+        'status'         => $balanceDue >= $totalAmount ? 'UNPAID' : ($amountPaid > 0 ? 'PARTIAL' : 'PAID'),
+    ]);
+
+    $invoice = Invoice::create($invoicePayload);
 
     // ────────────────────────────────────────────────
     // 7. Create invoice items (NO per-line discount anymore)
