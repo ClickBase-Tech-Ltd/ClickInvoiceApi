@@ -123,7 +123,7 @@ class InvoicePdfService
 
     return [
         'invoice'               => $invoice,
-        'current_plan'          => $invoice->creator->currentPlan,
+        'current_plan'          => $invoice->creator?->currentPlan,
         
         // Core money values — now correctly calculated
         'subtotal'              => $subtotal,

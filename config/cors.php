@@ -15,11 +15,22 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => [
+        'api/*',
+        'sanctum/csrf-cookie',
+        'tenant-logos/*',
+        'signatures/*',
+        'storage/*',
+    ],
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*', 'http://localhost:3000', 'http://localhost:3002', 'https://app.clickinvoice.clickbase.tech'],
+    'allowed_origins' => [
+        'http://localhost:3000',
+        'http://localhost:3002',
+        'https://app.clickinvoice.clickbase.tech',
+        'https://app.clickinvoice.app',
+    ],
 
     'allowed_origins_patterns' => [],
 
