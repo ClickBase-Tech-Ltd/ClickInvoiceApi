@@ -298,6 +298,11 @@ Route::get('/plans', function () {
     Route::patch('/support/tickets/{ticketId}/status', [SupportController::class, 'updateTicketStatus']);
 
     Route::post('/subscribe/{planId}', [SubscriptionController::class, 'create']); // Add auth
+    Route::patch('/subscriptions/{subscriptionId}/activate', [SubscriptionController::class, 'activate']);
+    Route::patch('/subscriptions/{subscriptionId}/deactivate', [SubscriptionController::class, 'deactivate']);
+    Route::patch('/subscriptions/{subscriptionId}/expire', [SubscriptionController::class, 'expire']);
+    Route::post('/subscriptions/assign-manual', [SubscriptionController::class, 'assignManual']);
+    Route::patch('/subscriptions/bulk-action', [SubscriptionController::class, 'bulkAction']);
 
     Route::get('/users/{id}/profile', [UsersController::class, 'profile']);
 

@@ -28,7 +28,6 @@ return [
     'allowed_origins' => [
         'http://localhost:3000',
         'http://localhost:3002',
-        'https://app.clickinvoice.clickbase.tech',
         'https://app.clickinvoice.app',
     ],
 

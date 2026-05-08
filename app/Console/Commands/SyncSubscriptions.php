@@ -17,9 +17,19 @@ class SyncSubscriptions extends Command
     {
         $now = Carbon::now();
 
-        // 1️⃣ Expire local subscriptions that have passed end date
+        // 1️⃣ Expire local subscriptions that have passed explicit endDate
+        // or have reached their nextBillingDate when endDate is missing.
         $expired = Subscription::where('status', 'active')
-            ->where('endDate', '<', $now)
+            ->where(function ($q) use ($now) {
+                $q->where(function ($q1) use ($now) {
+                    $q1->whereNotNull('endDate')
+                        ->where('endDate', '<', $now);
+                })->orWhere(function ($q2) use ($now) {
+                    $q2->whereNull('endDate')
+                        ->whereNotNull('nextBillingDate')
+                        ->where('nextBillingDate', '<', $now);
+                });
+            })
             ->get();
 
         foreach ($expired as $subscription) {
@@ -54,7 +64,7 @@ class SyncSubscriptions extends Command
     }
 
     Log::info("FlutterwaveSubscriptionId: {$subscription->flutterwaveSubscriptionId}");
-    $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+    $secretKey = config('services.flutterwave.secret_key');
 
     $getUserEmail = $subscription->user ? $subscription->user->email : 'unknown';
     Log::info("Fetching Flutterwave subscription for user: {$getUserEmail}");
@@ -124,7 +134,7 @@ private function cancelOnFlutterwave(Subscription $subscription)
         return;
     }
 
-    Http::withHeaders(['Authorization' => "Bearer " . env('FLUTTERWAVE_SECRET_KEY')])
+    Http::withHeaders(['Authorization' => "Bearer " . config('services.flutterwave.secret_key')])
         ->post("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
 
         $subscription->flutterwaveCancelledAt = now();

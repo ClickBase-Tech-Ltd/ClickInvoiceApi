@@ -340,36 +340,55 @@ private function getFallbackSymbol(string $code): string
 
 public function adminInvoiceSummary(Request $request)
 {
-    // IMPORTANT: disable tenant scope if it exists
-    Invoice::withoutGlobalScopes();
+    try {
+        $query = Invoice::query();
 
-    $summaries = Invoice::query()
-        ->leftJoin('currencies', 'invoices.currency', '=', 'currencies.currencyId')
-        ->selectRaw('
-            currencies.currencyCode AS currency_code,
-            currencies.currencySymbol AS currency_symbol,
-            currencies.country AS country,
-            currencies.currencySymbol AS currency_symbol,
-            SUM(invoices.amountPaid)  AS collected,
-            SUM(invoices.balanceDue) AS outstanding
-        ')
-        ->groupBy(
-            'currencies.currencyCode',
-            'currencies.currencySymbol',
-            'currencies.country',
-        )
-        ->get();
+        $range = strtolower((string) $request->query('range', ''));
+        $scope = strtolower((string) $request->query('scope', 'range'));
 
-    return response()->json(
-        $summaries->map(fn ($row) => [
-            'currency_code'   => $row->currency_code,
-            'currency_symbol' => $row->currency_symbol
-                ?? $this->getFallbackSymbol($row->currency_code),
-            'country'         => $row->country,
-            'collected'       => (float) $row->collected,
-            'outstanding'     => (float) $row->outstanding,
-        ])
-    );
+        if ($scope !== 'all_time' && in_array($range, ['7d', '30d', '90d', 'ytd'])) {
+            if ($range === 'ytd') {
+                $query->whereDate('invoiceDate', '>=', now()->startOfYear());
+            } else {
+                $days = $range === '7d' ? 7 : ($range === '30d' ? 30 : 90);
+                $query->whereDate('invoiceDate', '>=', now()->subDays($days));
+            }
+        }
+
+        $summaries = $query
+            ->leftJoin('currencies', 'invoices.currency', '=', 'currencies.currencyId')
+            ->selectRaw('
+                COALESCE(currencies.currencyCode, "UNKNOWN") AS currency_code,
+                COALESCE(currencies.currencySymbol, "$") AS currency_symbol,
+                COALESCE(currencies.country, "Unmapped") AS country,
+                SUM(COALESCE(NULLIF(invoices.amountPaid, ""), 0) + 0) AS collected,
+                SUM(COALESCE(NULLIF(invoices.balanceDue, ""), 0) + 0) AS outstanding
+            ')
+            ->groupBy(
+                'currencies.currencyCode',
+                'currencies.currencySymbol',
+                'currencies.country'
+            )
+            ->orderByRaw('
+                CASE WHEN currencies.currencyCode IS NULL THEN 1 ELSE 0 END ASC,
+                SUM(COALESCE(NULLIF(invoices.amountPaid, ""), 0) + 0) + SUM(COALESCE(NULLIF(invoices.balanceDue, ""), 0) + 0) DESC
+            ')
+            ->get();
+
+        return response()->json(
+            $summaries->map(fn ($row) => [
+                'currency_code'   => $row->currency_code,
+                'currency_symbol' => $row->currency_symbol
+                    ?? $this->getFallbackSymbol($row->currency_code ?? 'USD'),
+                'country'         => $row->country,
+                'collected'       => (float) ($row->collected ?? 0),
+                'outstanding'     => (float) ($row->outstanding ?? 0),
+            ])
+        );
+    } catch (\Throwable $e) {
+        \Log::error('adminInvoiceSummary error: ' . $e->getMessage());
+        return response()->json([], 200);
+    }
 }
 
 

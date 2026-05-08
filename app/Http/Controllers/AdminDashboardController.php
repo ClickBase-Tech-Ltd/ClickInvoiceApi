@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\Invoice;
 use App\Models\Tenant;
+use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
@@ -21,6 +22,16 @@ class AdminDashboardController extends Controller
         $totalBusinesses = Tenant::count();
         $activeBusinesses = Tenant::where('status', 'active')->count();
         $inactiveBusinesses = Tenant::where('status', 'inactive')->count();
+        $subscriptionRevenueUsd = Subscription::with('plan')
+            ->whereIn('status', ['active', 'cancelled', 'expired'])
+            ->get()
+            ->sum(function ($sub) {
+                $metaAmount = data_get($sub->metadata, 'amount_paid');
+                if ($metaAmount !== null && $metaAmount !== '') {
+                    return (float) $metaAmount;
+                }
+                return (float) ($sub->plan->price ?? 0);
+            });
 
         return response()->json([
             'totalUsers' => $totalUsers,
@@ -29,6 +40,7 @@ class AdminDashboardController extends Controller
             'totalBusinesses' => $totalBusinesses,
             'activeBusinesses' => $activeBusinesses,
             'inactiveBusinesses' => $inactiveBusinesses,
+            'subscriptionRevenueUsd' => round($subscriptionRevenueUsd, 2),
         ]);
     }
 

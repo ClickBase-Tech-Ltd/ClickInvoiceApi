@@ -225,7 +225,7 @@ public function sendReceiptEmail(Request $request, $id)
                 'logoCid' => $logoCid,
             ])->render();
 
-            $message->setBody($html, 'text/html');
+            $message->html($html);
 
             // Attach PDF
             $message->attachData($result['pdf_content'], $result['filename'], [

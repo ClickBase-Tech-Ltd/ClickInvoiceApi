@@ -39,5 +39,11 @@ return [
         'api_url' => env('MONIEPOINT_API_URL', 'https://api.pos.moniepoint.com/v1/transactions'),
     ],
 
+    'flutterwave' => [
+        'public_key' => env('FLUTTERWAVE_PUBLIC_KEY'),
+        'secret_key' => env('FLUTTERWAVE_SECRET_KEY'),
+        'webhook_secret' => env('FLUTTERWAVE_WEBHOOK_SECRET'),
+    ],
+
 
 ];

@@ -8,6 +8,7 @@ use App\Models\Subscription;
 use App\Models\Payment;
 use App\Models\User; // Assuming auth
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class SubscriptionController extends Controller
@@ -58,7 +59,7 @@ class SubscriptionController extends Controller
         }
 
         // --- Guard: Flutterwave key must be set ---
-        $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+        $secretKey = config('services.flutterwave.secret_key');
         if (!$secretKey) {
             Log::error('FLUTTERWAVE_SECRET_KEY is not set in .env');
             return response()->json(['error' => 'Payment gateway not configured. Please contact support.'], 500);
@@ -163,7 +164,7 @@ public function verifyRedirect(Request $request)
 
     // Optional: Extra security - verify with Flutterwave
     if ($status === 'successful' && $transactionId) {
-        $response = Http::withToken(env('FLUTTERWAVE_SECRET_KEY'))
+        $response = Http::withToken(config('services.flutterwave.secret_key'))
             ->get("https://api.flutterwave.com/v3/transactions/{$transactionId}/verify");
 
         if ($response->successful() && $response->json('data.status') === 'successful') {
@@ -202,7 +203,7 @@ public function verifyRedirect(Request $request)
         return response()->json(['error' => 'No active subscription'], 400);
     }
 
-    $secretKey = env('FLUTTERWAVE_SECRET_KEY');
+    $secretKey = config('services.flutterwave.secret_key');
     $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
         ->put("https://api.flutterwave.com/v3/subscriptions/{$sub->flutterwave_subscription_id}/cancel");
 
@@ -276,7 +277,7 @@ public function activate(Request $request, $subscriptionId)
         if ($subscription->flutterwaveSubscriptionId) {
             try {
                 $response = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . env('FLUTTERWAVE_SECRET_KEY'),
+                    'Authorization' => 'Bearer ' . config('services.flutterwave.secret_key'),
                 ])->patch("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
 
                 if ($response->failed()) {
@@ -353,6 +354,132 @@ public function activate(Request $request, $subscriptionId)
         return response()->json([
             'message' => 'Subscription expired successfully',
             'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+        ]);
+    }
+
+    public function assignManual(Request $request)
+    {
+        $validated = $request->validate([
+            'userId' => 'required|integer|exists:users,id',
+            'planId' => 'required|integer|exists:plans,planId',
+            'status' => 'nullable|in:active,pending',
+            'startDate' => 'nullable|date',
+            'nextBillingDate' => 'nullable|date',
+            'expiryDate' => 'nullable|date',
+            'amountPaid' => 'nullable|numeric|min:0',
+            'paymentChannel' => 'nullable|string|max:100',
+            'paymentReference' => 'nullable|string|max:255',
+            'evidenceUrl' => 'nullable|url|max:500',
+            'reason' => 'nullable|string|max:1000',
+        ]);
+
+        $status = $validated['status'] ?? 'active';
+
+        $user = User::findOrFail($validated['userId']);
+        $plan = Plans::with('currency_detail')->where('planId', $validated['planId'])->firstOrFail();
+
+        $start = isset($validated['startDate']) ? Carbon::parse($validated['startDate']) : Carbon::now();
+        $nextBilling = isset($validated['nextBillingDate'])
+            ? Carbon::parse($validated['nextBillingDate'])
+            : (clone $start)->addMonth();
+        $expiry = isset($validated['expiryDate'])
+            ? Carbon::parse($validated['expiryDate'])
+            : $nextBilling;
+
+        $adminId = auth()->id();
+
+        $metadata = [
+            'manual_activation' => true,
+            'assigned_by_admin_id' => $adminId,
+            'assigned_at' => Carbon::now()->toDateTimeString(),
+            'payment_channel' => $validated['paymentChannel'] ?? null,
+            'payment_reference' => $validated['paymentReference'] ?? null,
+            'amount_paid' => $validated['amountPaid'] ?? null,
+            'evidence_url' => $validated['evidenceUrl'] ?? null,
+            'reason' => $validated['reason'] ?? null,
+        ];
+
+        $subscription = DB::transaction(function () use ($user, $plan, $status, $start, $nextBilling, $expiry, $metadata) {
+            Subscription::where('userId', $user->id)
+                ->where('status', 'active')
+                ->update([
+                    'status' => 'cancelled',
+                    'endDate' => Carbon::now(),
+                ]);
+
+            $newSub = Subscription::create([
+                'userId' => $user->id,
+                'planId' => $plan->planId,
+                'status' => $status,
+                'startDate' => $status === 'active' ? $start : null,
+                'nextBillingDate' => $status === 'active' ? $nextBilling : null,
+                'endDate' => $status === 'active' ? $expiry : null,
+                'metadata' => array_filter($metadata, fn ($value) => $value !== null && $value !== ''),
+            ]);
+
+            $user->update(['currentPlan' => $plan->planId]);
+
+            return $newSub;
+        });
+
+        return response()->json([
+            'message' => 'Manual subscription assigned successfully',
+            'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+        ], 201);
+    }
+
+    public function bulkAction(Request $request)
+    {
+        $validated = $request->validate([
+            'subscriptionIds' => 'required|array|min:1',
+            'subscriptionIds.*' => 'integer|exists:subscriptions,subscriptionId',
+            'action' => 'required|in:activate,deactivate,expire',
+            'reason' => 'nullable|string|max:1000',
+        ]);
+
+        $subscriptions = Subscription::whereIn('subscriptionId', $validated['subscriptionIds'])
+            ->with('user')
+            ->get();
+
+        $now = Carbon::now();
+        $updated = 0;
+
+        foreach ($subscriptions as $subscription) {
+            if ($validated['action'] === 'activate') {
+                $subscription->status = 'active';
+                $subscription->startDate = $subscription->startDate ?: $now;
+                $subscription->nextBillingDate = $subscription->nextBillingDate ?: (clone $now)->addMonth();
+                $subscription->endDate = null;
+            } elseif ($validated['action'] === 'expire') {
+                $subscription->status = 'expired';
+                $subscription->endDate = $now;
+            } else {
+                $subscription->status = 'cancelled';
+                $subscription->endDate = $now;
+            }
+
+            $existingMeta = is_array($subscription->metadata) ? $subscription->metadata : [];
+            $subscription->metadata = array_merge($existingMeta, [
+                'bulk_action' => $validated['action'],
+                'bulk_action_reason' => $validated['reason'] ?? null,
+                'bulk_action_by_admin_id' => auth()->id(),
+                'bulk_action_at' => $now->toDateTimeString(),
+            ]);
+            $subscription->save();
+
+            if ($subscription->user && $validated['action'] === 'activate') {
+                $subscription->user->update(['currentPlan' => $subscription->planId]);
+            }
+            if ($subscription->user && in_array($validated['action'], ['expire', 'deactivate'])) {
+                $subscription->user->update(['currentPlan' => 1]);
+            }
+
+            $updated++;
+        }
+
+        return response()->json([
+            'message' => 'Bulk action completed successfully',
+            'updated' => $updated,
         ]);
     }
 }
