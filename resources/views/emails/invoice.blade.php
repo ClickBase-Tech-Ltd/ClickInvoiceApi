@@ -32,7 +32,10 @@
             <ul>
                 <li>Invoice Number: {{ $invoice->userGeneratedInvoiceId ?? $invoice->invoiceId }}</li>
                 <li>Project: {{ $invoice->projectName }}</li>
-                <li>Date: {{ \Carbon\Carbon::parse($invoice->invoiceDate)->format('F d, Y') }}</li>
+                <li>Date: {{ \Carbon\Carbon::parse($invoice->invoiceDate ?? $invoice->created_at)->format('F d, Y') }}</li>
+                @if(!empty($invoice->dueDate))
+                <li>Due Date: {{ \Carbon\Carbon::parse($invoice->dueDate)->format('F d, Y') }}</li>
+                @endif
                 <li>Status: {{ strtoupper($invoice->status) }}</li>
             </ul>
 

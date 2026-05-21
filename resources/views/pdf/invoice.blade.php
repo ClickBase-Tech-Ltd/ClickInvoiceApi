@@ -324,7 +324,10 @@
                             <div style="font-size: 28px; font-weight: 900; color: #0A66C2; letter-spacing: 2px; margin-bottom: 0px;">INVOICE</div>
                             <div style="display:flex; flex-direction:column; align-items:flex-end;">
                                 <div style="font-weight:700; font-size:15px; color:#374151;">Invoice #: {{ $userGeneratedInvoiceId ?? $invoiceId }}</div>
-                                <div style="font-weight:700; font-size:14px; color:#374151;">Date: {{ \Carbon\Carbon::parse($invoice->invoiceDate ?? $invoice->created_at)->format('d M, Y') }}</div>
+                                <div style="font-weight:700; font-size:14px; color:#374151;">Date: {{ \Carbon\Carbon::parse($invoiceDate ?? $invoice->invoiceDate ?? $invoice->created_at)->format('d M, Y') }}</div>
+                                @if(!empty($dueDate) || !empty($invoice->dueDate))
+                                <div style="font-weight:700; font-size:14px; color:#374151;">Due Date: {{ \Carbon\Carbon::parse($dueDate ?? $invoice->dueDate)->format('d M, Y') }}</div>
+                                @endif
                             </div>
                         </div>
                     </td>

@@ -251,10 +251,10 @@ class InvoicePdfService
         'companyPhone'          => $receipt->tenant->tenantPhone,
         'companyTaxId'          => $receipt->tenant->taxId,
 
-        'customerName'          => $receipt->customer->customerName ?? $receipt->accountName,
-        'customerEmail'         => $receipt->customer->customerEmail ?? null,
-        'customerPhone'         => $receipt->customer->customerPhone ?? null,
-        'customerAddress'       => $receipt->customer->customerAddress ?? null,
+        'customerName'          => $receipt->customer?->customerName ?? $receipt->accountName,
+        'customerEmail'         => $receipt->customer?->customerEmail ?? null,
+        'customerPhone'         => $receipt->customer?->customerPhone ?? null,
+        'customerAddress'       => $receipt->customer?->customerAddress ?? null,
 
         'projectName'           => $receipt->projectName,
         'receiptDate'           => $receipt->updated_at,           // or use $receipt->receiptDate if you add that column

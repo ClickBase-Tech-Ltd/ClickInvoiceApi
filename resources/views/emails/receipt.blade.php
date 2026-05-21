@@ -17,7 +17,7 @@
 <body>
     <div class="container">
         <div class="logo">
-            <img src="{{ $logoCid ?? 'https://app.clickinvoice.app/images/logo/logo.svg' }}" alt="ClickInvoice" width="140" style="display:block;margin:0 auto;" />
+            <img src="https://app.clickinvoice.app/images/logo/logo.svg" alt="ClickInvoice" width="140" style="display:block;margin:0 auto;" />
         </div>
         <div class="header">
             <h1>Payment Receipt</h1>
@@ -32,7 +32,7 @@
             <ul>
                 <li>Receipt Number: {{ $receipt->receiptId }}</li>
                 <li>Project: {{ $receipt->projectName }}</li>
-                <li>Date: {{ \Carbon\Carbon::parse($receipt->receiptDate)->format('F d, Y') }}</li>
+                <li>Date: {{ \Carbon\Carbon::parse($receipt->receiptDate ?? $receipt->invoiceDate ?? $receipt->updated_at)->format('F d, Y') }}</li>
                 <li>Status: {{ strtoupper($receipt->status) }}</li>
             </ul>
 
