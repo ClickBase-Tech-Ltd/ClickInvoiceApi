@@ -46,6 +46,10 @@
 
         <div class="footer">
             <p>This is an automated message, please do not reply to this email.</p>
+            @include('emails.partials.social-follow')
+            <p style="margin-top:12px;">
+                <a href="https://clickinvoice.app" style="color:#0A66C2;">clickinvoice.app</a>
+            </p>
         </div>
     </div>
 </body>

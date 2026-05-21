@@ -45,5 +45,12 @@ return [
         'webhook_secret' => env('FLUTTERWAVE_WEBHOOK_SECRET'),
     ],
 
+    'webpush' => [
+        'subject' => env('WEBPUSH_SUBJECT', 'mailto:support@clickinvoice.app'),
+        'public_key' => env('WEBPUSH_PUBLIC_KEY'),
+        'private_key' => env('WEBPUSH_PRIVATE_KEY'),
+        'app_url' => env('WEBPUSH_APP_URL', 'https://app.clickinvoice.app'),
+    ],
+
 
 ];

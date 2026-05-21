@@ -440,6 +440,8 @@ public function signin(Request $request)
     return response()->json([
         'status'      => true,
         'message'     => 'Logged in',
+        'accessToken' => $accessToken,
+        'refreshToken' => $refreshToken,
         'firstName'   => $user->firstName ?? '',
         'lastName'    => $user->lastName ?? '',
         'email'       => $user->email ?? '',
@@ -456,7 +458,9 @@ public function signin(Request $request)
 
     public function refresh(Request $request)
     {
-        $refreshToken = $request->cookie('refresh_token');
+        $refreshToken = $request->cookie('refresh_token')
+            ?? $request->input('refresh_token')
+            ?? $request->input('refreshToken');
 
         if (!$refreshToken) {
             return response()->json(['error' => 'Refresh token missing'], 401);
@@ -484,7 +488,11 @@ public function signin(Request $request)
             'expires_at' => Carbon::now()->addDays(14),
         ]);
 
-        return response()->json(['message' => 'Token refreshed'])
+        return response()->json([
+            'message' => 'Token refreshed',
+            'accessToken' => $newAccessToken,
+            'refreshToken' => $newRefreshToken,
+        ])
             ->cookie('access_token', $newAccessToken, 60, null, null, true, true, false, 'strict')
             ->cookie('refresh_token', $newRefreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');
     }
@@ -492,7 +500,9 @@ public function signin(Request $request)
 
     public function logout(Request $request)
     {
-        $refreshToken = $request->cookie('refresh_token');
+        $refreshToken = $request->cookie('refresh_token')
+            ?? $request->input('refresh_token')
+            ?? $request->input('refreshToken');
 
         if ($refreshToken) {
             RefreshToken::where('token', $refreshToken)->delete();

@@ -18,11 +18,17 @@ class VerifyJwtToken
             return $next($request);
         }
 
-        // Get token from cookie
+        // Cookie (same-site) or Authorization header (local dev / cross-origin)
         $token = $request->cookie('access_token');
+        if (!$token) {
+            $authHeader = (string) $request->header('Authorization', '');
+            if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+                $token = trim($matches[1]);
+            }
+        }
 
         if (!$token) {
-            \Log::warning('No access_token cookie found');
+            \Log::warning('No access_token cookie or Bearer token found');
             return response()->json(['message' => 'Unauthorized - No token'], 401);
         }
 

@@ -57,6 +57,7 @@ use App\Http\Controllers\AdminDashboardController;
 use App\Http\Controllers\ReferralController;
 use App\Http\Controllers\AdminLoginActivityController;
 use App\Http\Controllers\InAppNotificationController;
+use App\Http\Controllers\PushSubscriptionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -101,12 +102,18 @@ Route::post('/notifications', [InAppNotificationController::class, 'store']);
 Route::patch('/notifications', [InAppNotificationController::class, 'update']);
 Route::delete('/notifications', [InAppNotificationController::class, 'destroy']);
 
+Route::get('/push/vapid-public-key', [PushSubscriptionController::class, 'vapidPublicKey']);
+
 Route::post('/admin/login-activity', [AdminLoginActivityController::class, 'store']);
 Route::get('/admin/login-activity', [AdminLoginActivityController::class, 'index']);
 
 Route::middleware(['auth.jwt'])->group(function () {
     Route::post('/referrals/generate', [ReferralController::class, 'generate']);
     Route::get('/referrals/me', [ReferralController::class, 'me']);
+
+    Route::post('/push/subscribe', [PushSubscriptionController::class, 'subscribe']);
+    Route::delete('/push/subscribe', [PushSubscriptionController::class, 'unsubscribe']);
+    Route::patch('/push/preferences', [PushSubscriptionController::class, 'updatePreferences']);
 });
 
 Route::get('/currencies', function(){
@@ -338,6 +345,7 @@ Route::get('/plans', function () {
 
     Route::post('/users/{id}/send-email', [UserEmailController::class, 'sendSingle']);
     Route::post('/users/broadcast-email', [UserEmailController::class, 'broadcast']);
+    Route::post('/notifications/broadcast', [InAppNotificationController::class, 'adminBroadcast']);
 });
 
 Route::prefix('invoices')->group(function () {

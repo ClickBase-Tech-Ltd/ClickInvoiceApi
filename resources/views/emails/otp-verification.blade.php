@@ -42,15 +42,12 @@
             <p>If you didn't create an account with ClickInvoice, please ignore this email.</p>
         </div>
 
-        <tr>
-            <td class="footer">
-                <p>
-                    <a href="https://clickinvoice.app">clickinvoice.app</a> ·
-                    <a href="mailto:info@clickinvoice.app">info@clickinvoice.app</a>
-                </p>
-                <p>© {{ date('Y') }} ClickInvoice Ltd.</p>
-            </td>
-        </tr>
+        @include('emails.partials.social-follow')
+        <p style="color: #6b7280; font-size: 12px; margin-top: 12px;">
+            <a href="https://clickinvoice.app" style="color:#0A66C2;">clickinvoice.app</a> ·
+            <a href="mailto:support@clickinvoice.app" style="color:#0A66C2;">support@clickinvoice.app</a>
+        </p>
+        <p style="color: #9ca3af; font-size: 12px;">© {{ date('Y') }} ClickInvoice Ltd.</p>
     </div>
 </body>
 </html>

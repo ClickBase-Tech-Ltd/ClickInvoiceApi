@@ -35,7 +35,12 @@
 
     <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
 
-    <p style="color: #6b7280; font-size: 14px;">ClickInvoice</p>
+    @include('emails.partials.social-follow')
+
+    <p style="color: #6b7280; font-size: 12px; margin-top: 12px;">
+        <a href="https://clickinvoice.app" style="color:#0A66C2;">clickinvoice.app</a>
+    </p>
+    <p style="color: #9ca3af; font-size: 12px;">© {{ date('Y') }} ClickInvoice Ltd.</p>
 </div>
 </body>
 </html>

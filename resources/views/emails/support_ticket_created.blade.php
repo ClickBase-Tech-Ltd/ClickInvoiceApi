@@ -57,8 +57,9 @@
         <tr>
             <td class="footer">
                 <p>You are receiving this because a new support ticket was created on ClickInvoice.</p>
-                <p><a href="https://clickinvoice.app">clickinvoice.app</a> · <a href="mailto:info@clickinvoice.app">info@clickinvoice.app</a></p>
-                <p>© {{ date('Y') }} ClickInvoice</p>
+                @include('emails.partials.social-follow')
+                <p style="margin-top:12px;"><a href="https://clickinvoice.app">clickinvoice.app</a> · <a href="mailto:support@clickinvoice.app">support@clickinvoice.app</a></p>
+                <p>© {{ date('Y') }} ClickInvoice Ltd.</p>
             </td>
         </tr>
     </table>
