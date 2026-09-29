@@ -22,6 +22,17 @@ class SubscriptionController extends Controller
             return response()->json(['message' => 'Billing administrator access is required.'], 403);
         }
 
+        if ($request->boolean('summary')) {
+            $subscriptions = Subscription::query()
+                ->select(['subscriptionId', 'status', 'created_at', 'startDate', 'metadata', 'planId'])
+                ->with(['plan' => function ($query) {
+                    $query->select(['planId', 'price']);
+                }])
+                ->get();
+
+            return response()->json(['subscriptions' => $subscriptions]);
+        }
+
         $subscriptions = Subscription::with('user', 'plan.currency_detail')->get();
 
         return response()->json([

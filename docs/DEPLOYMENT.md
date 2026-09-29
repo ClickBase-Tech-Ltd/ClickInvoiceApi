@@ -23,6 +23,40 @@ Before running pending migrations, it creates a compressed MySQL backup under `/
 
 Migrations must remain forward-only and backward-compatible with the currently serving release. Database schema changes are not automatically reversed during a code rollback.
 
-## Deploy
+## Quick deploy
 
-Merge the reviewed backend changes into `main`. The workflow starts automatically. A deployment can also be started from **Actions → Deploy ClickInvoice API → Run workflow**. Check the workflow run before considering the release complete.
+Use either of these two paths:
+
+1. Push to `main` (preferred)
+   ```bash
+   git checkout main
+   git pull --ff-only origin main
+   git push origin main
+   ```
+   This automatically triggers the production deployment workflow.
+
+2. Manual trigger from the repo
+   ```bash
+   cd /Applications/ClickInvoice/ClickInvoiceApi
+   gh workflow run deploy-api.yml --ref main
+   ```
+
+The workflow performs the production release flow defined in this repo: run tests, create a versioned release under `/var/www/ClickInvoiceApi/releases/api-<commit-sha>`, back up MySQL, run `php artisan migrate --force`, switch nginx to the new `public/`, and run the Paystack/plan smoke checks.
+
+If the workflow fails, stop and inspect the job logs before retrying. Do not bypass the backup + migration + smoke test gate for production.
+
+## Production safety checks
+
+The live backend must satisfy all of these before calling the release successful:
+
+- `GET https://api.clickinvoice.app/api/subscription-plans` returns valid JSON with the expected NGN plan prices
+- `POST https://api.clickinvoice.app/api/paystack/webhook` without a valid signature returns `401`
+- `paystackPlanCode` values are populated for the active paid plans in the production database
+- the configured secret key is the correct environment key (`sk_live_...` in production, `sk_test_...` locally)
+
+For ClickInvoice production, the live Paystack plans should match:
+
+- `BASIC = ₦6,600.00` with `PLN_2dovo0znzr4lif0`
+- `PREMIUM = ₦13,300.00` with `PLN_8i0rr7771fvtnym`
+
+Check the job from **GitHub → Actions → Deploy ClickInvoice API** and confirm the workflow completes before treating the site as live.
