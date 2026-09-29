@@ -15,6 +15,8 @@ Configure these Actions secrets in the repository (or its `production` environme
 
 Install the matching public key in the deploy account's `authorized_keys`. Obtain the host key fingerprint through a trusted server console, then store the pinned `known_hosts` line in GitHub; do not disable SSH host verification.
 
+The `production` environment currently has no environment secrets configured. Add all four values above there (or configure them as repository Actions secrets). `DEPLOY_SSH_KEY` must be the private key whose public key is installed on the server. `DEPLOY_KNOWN_HOSTS` must contain the pinned known-hosts line for `168.231.114.123`. The workflow now validates these values and explicitly selects that key and host pin for each SSH connection.
+
 ## Release Behavior
 
 The workflow tests with PHP 8.2 and SQLite, then uploads the API source and production Composer dependencies to `/var/www/ClickInvoiceApi/releases/api-<commit-sha>`. It links the existing production `.env` and storage, caches Laravel configuration, and verifies Paystack routes are registered without retired provider routes.
@@ -25,19 +27,23 @@ Migrations must remain forward-only and backward-compatible with the currently s
 
 ## Quick deploy
 
-Use either of these two paths:
+### Fast path
 
-1. Push to `main` (preferred)
-   ```bash
-   git checkout main
-   git pull --ff-only origin main
-   git push origin main
-   ```
-   This automatically triggers the production deployment workflow.
+After committing the backend changes on `main`, deploy with one command:
 
-2. Manual trigger from the repo
+```bash
+git push origin main
+```
+
+The API workflow runs tests, prepares the production release, creates and verifies a database backup, migrates, switches nginx, and runs smoke checks. It excludes local `node_modules` from the upload; these files are not needed by the Laravel runtime.
+
+For a normal code change, the push is the only deploy command. If the branch is not `main`, switch to `main` and fast-forward first, then push.
+
+### Alternatives
+
+1. From the GitHub Actions page, manually run **Deploy ClickInvoice API** on `main`.
+2. With GitHub CLI installed and authenticated, trigger it from the repo:
    ```bash
-   cd /Applications/ClickInvoice/ClickInvoiceApi
    gh workflow run deploy-api.yml --ref main
    ```
 
