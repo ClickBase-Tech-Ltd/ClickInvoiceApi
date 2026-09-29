@@ -71,6 +71,10 @@ jobs:
             echo "::error::DEPLOY_KNOWN_HOSTS has no pinned key for DEPLOY_HOST"
             exit 1
           fi
+          if ! ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=10 "$DEPLOY_USER@$DEPLOY_HOST" 'test -d /var/www/ClickInvoiceApi/releases'; then
+            echo "::error::SSH authentication or access to the API releases directory failed. Check DEPLOY_SSH_KEY, DEPLOY_USER, and the matching public key in authorized_keys."
+            exit 1
+          fi
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
