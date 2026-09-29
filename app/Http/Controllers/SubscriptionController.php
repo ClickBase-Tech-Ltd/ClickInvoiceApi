@@ -2,20 +2,25 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use App\Models\Plans;
 use App\Models\Subscription;
 use App\Models\Payment;
 use App\Models\User; // Assuming auth
+use App\Services\PaystackClient;
+use App\Services\PaystackSubscriptionService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class SubscriptionController extends Controller
 {
 
     public function index(Request $request)
     {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
 
         $subscriptions = Subscription::with('user', 'plan.currency_detail')->get();
 
@@ -37,7 +42,25 @@ class SubscriptionController extends Controller
         ]);
     }
 
-    public function create(Request $request, $planId)
+    public function verifyPaystackPayment(Request $request, PaystackClient $paystack, PaystackSubscriptionService $subscriptions)
+    {
+        $validated = $request->validate([
+            'reference' => 'required|string|max:100',
+        ]);
+
+        $payment = Payment::where('provider', 'paystack')
+            ->where('providerReference', $validated['reference'])
+            ->where('userId', auth()->id())
+            ->first();
+
+        if (!$payment) {
+            return response()->json(['status' => 'not_found'], 404);
+        }
+
+        return response()->json($subscriptions->verifyAndApply($validated['reference'], $paystack));
+    }
+
+    public function create(Request $request, $planId, PaystackClient $paystack)
     {
         $user = auth()->user();
 
@@ -47,9 +70,18 @@ class SubscriptionController extends Controller
             return response()->json(['error' => 'Plan not found'], 404);
         }
 
-        // --- Guard: plan must have a Flutterwave plan ID configured ---
-        if (!$plan->flutterwavePlanId) {
-            return response()->json(['error' => 'This plan is not configured for online payment. Please contact support.'], 400);
+        if (!$paystack->isConfiguredForCurrentEnvironment()) {
+            $requiredMode = app()->environment('production') ? 'Live' : 'Test';
+
+            return response()->json([
+                'error' => "Paystack {$requiredMode} credentials are required for this environment. No payment was started.",
+                'code' => 'paystack_environment_mismatch',
+            ], 503);
+        }
+
+        $planCode = $plan->paystackPlanCodeForCurrentEnvironment();
+        if (!$planCode) {
+            return response()->json(['error' => 'This plan is not configured for Paystack subscription billing. Please contact support.'], 400);
         }
 
         // --- Guard: currency relation must be loaded ---
@@ -58,166 +90,198 @@ class SubscriptionController extends Controller
             return response()->json(['error' => 'Plan currency is not configured. Please contact support.'], 500);
         }
 
-        // --- Guard: Flutterwave key must be set ---
-        $secretKey = config('services.flutterwave.secret_key');
-        if (!$secretKey) {
-            Log::error('FLUTTERWAVE_SECRET_KEY is not set in .env');
+        if (!config('services.paystack.secret_key')) {
+            Log::error('Paystack secret key is not configured.');
             return response()->json(['error' => 'Payment gateway not configured. Please contact support.'], 500);
         }
 
-        // --- Guard: duplicate active subscription on same plan ---
-        $existingSub = $user->subscription;
-        if ($existingSub && $existingSub->status === 'active' && $existingSub->planId == $plan->planId) {
+        // Ignore stale active rows whose billing period has already ended.
+        $hasCurrentPlan = Subscription::query()
+            ->where('userId', $user->id)
+            ->where('planId', $plan->planId)
+            ->where('status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('startDate')->orWhere('startDate', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('endDate')->orWhere('endDate', '>', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', now());
+            })
+            ->exists();
+
+        if ($hasCurrentPlan) {
             return response()->json(['error' => 'You already have an active subscription on this plan'], 400);
         }
 
-        // Create a pending subscription record to track this checkout attempt
-        $subscription = Subscription::create([
-            'userId'                    => $user->id,
-            'planId'                    => $plan->planId,
-            'flutterwaveSubscriptionId' => $plan->flutterwaveSubscriptionId ?? null,
-            'status'                    => 'pending',
-        ]);
+        $reference = 'ci_sub_' . Str::uuid()->toString();
+        $currency = strtoupper($plan->currency_detail->currencyCode);
+        $amountMinor = (int) round(((float) $plan->price) * 100);
+        $frontendUrl = app()->environment(['local', 'testing'])
+            ? 'http://localhost:3002'
+            : rtrim((string) config('clickinvoice.app_url'), '/');
+        $callbackUrl = $frontendUrl . '/dashboard/subscription/success?reference=' . urlencode($reference);
 
-        $txRef = 'sub-' . $subscription->subscriptionId . '-' . time();
+        $subscription = null;
+        $payment = null;
 
-        // Build customer name from firstName/lastName fields
-        $customerName = trim(($user->firstName ?? '') . ' ' . ($user->lastName ?? ''));
-        if ($customerName === '') {
-            $customerName = $user->email;
-        }
+        try {
+            [$subscription, $payment] = DB::transaction(function () use ($user, $plan, $reference, $currency) {
+                $subscription = Subscription::create([
+                    'userId' => $user->id,
+                    'planId' => $plan->planId,
+                    'provider' => 'paystack',
+                    'status' => 'pending',
+                ]);
 
-        // Redirect back to the frontend subscriptions page after payment
-        $frontendRedirect = rtrim(env('FRONTEND_URL', 'https://app.clickinvoice.app'), '/')
-            . '/dashboard/my-subscriptions';
-
-        // Call Flutterwave Payments API
-        $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
-            ->post('https://api.flutterwave.com/v3/payments', [
-                'tx_ref'       => $txRef,
-                'amount'       => $plan->price,
-                'currency'     => $plan->currency_detail->currencyCode,
-                'payment_plan' => $plan->flutterwavePlanId,
-                'redirect_url' => $frontendRedirect,
-                'customer'     => [
-                    'email' => $user->email,
-                    'name'  => $customerName,
-                ],
-                'customizations' => [
-                    'title'       => 'ClickInvoice – ' . $plan->planName,
-                    'description' => $plan->planName . ' monthly subscription',
-                    'logo'        => 'https://app.clickinvoice.app/icons/icon-192x192.png',
-                ],
-                'meta' => [
+                $payment = Payment::create([
                     'subscriptionId' => $subscription->subscriptionId,
-                    'userId'         => $user->id,
-                ],
-            ]);
+                    'provider' => 'paystack',
+                    'providerReference' => $reference,
+                    'userId' => $user->id,
+                    'amount' => $plan->price,
+                    'currency' => $currency,
+                    'status' => 'pending',
+                ]);
 
-        if ($response->successful()) {
-            $responseData = $response->json();
-            $link = $responseData['data']['link'] ?? null;
+                return [$subscription, $payment];
+            });
 
-            if (!$link) {
-                $subscription->delete();
-                Log::error('Flutterwave returned success but no payment link', ['response' => $responseData]);
-                return response()->json(['error' => 'Payment gateway did not return a payment link.'], 500);
+            $response = $paystack->initializeSubscription(
+                $user->email,
+                $amountMinor,
+                $currency,
+                $planCode,
+                $reference,
+                $callbackUrl,
+                [
+                    'subscription_id' => $subscription->subscriptionId,
+                    'payment_id' => $payment->id,
+                    'user_id' => $user->id,
+                    'plan_id' => $plan->planId,
+                ]
+            );
+
+            $authorizationUrl = $response->json('data.authorization_url');
+            if (!$response->successful() || !$authorizationUrl) {
+                $subscription->update(['status' => 'failed']);
+                $payment->update(['status' => 'failed']);
+                Log::warning('Paystack subscription checkout initialization failed', [
+                    'subscription_id' => $subscription->subscriptionId,
+                    'provider_status' => $response->status(),
+                ]);
+
+                return response()->json([
+                    'error' => 'We could not start checkout. Please try again or contact support.',
+                ], 502);
             }
 
-            // Record the pending payment
-            Payment::create([
-                'subscriptionId'   => $subscription->subscriptionId,
-                'amount'           => $plan->price,
-                'currency'         => $plan->currency_detail->currencyCode,
-                'status'           => 'pending',
-                'flutterwaveTxRef' => $txRef,
-                'userId'           => $user->id,
+            return response()->json([
+                'authorization_url' => $authorizationUrl,
+                'reference' => $reference,
             ]);
+        } catch (\Throwable $exception) {
+            if ($subscription && $payment) {
+                $subscription->update(['status' => 'failed']);
+                $payment->update(['status' => 'failed']);
+            }
 
-            return response()->json(['payment_link' => $link]);
-        } else {
-            $subscription->delete();
-
-            $flwError = $response->json();
-            Log::error('Flutterwave payment initiation failed', [
-                'status'   => $response->status(),
-                'response' => $flwError,
-                'planId'   => $planId,
-                'userId'   => $user->id,
+            Log::error('Paystack subscription checkout error', [
+                'plan_id' => $planId,
+                'user_id' => $user->id,
+                'error' => $exception->getMessage(),
             ]);
-
-            $message = $flwError['message'] ?? ($flwError['error'] ?? 'Failed to initiate payment with Flutterwave.');
 
             return response()->json([
-                'error'   => $message,
-                'details' => $flwError,
+                'error' => 'We could not start checkout. Please try again or contact support.',
             ], 502);
-        }
-    }
-
-
-public function verifyRedirect(Request $request)
-{
-    $status = $request->query('status');
-    $txRef = $request->query('tx_ref');
-    $transactionId = $request->query('transaction_id');
-
-    // Optional: Extra security - verify with Flutterwave
-    if ($status === 'successful' && $transactionId) {
-        $response = Http::withToken(config('services.flutterwave.secret_key'))
-            ->get("https://api.flutterwave.com/v3/transactions/{$transactionId}/verify");
-
-        if ($response->successful() && $response->json('data.status') === 'successful') {
-            // Safe to show success (webhook will have already updated DB)
-            return redirect(env('FRONTEND_URL') . "/subscription/success?tx_ref={$txRef}");
-        }
-    }
-
-    // Failed, cancelled, or verification failed
-    return redirect(env('FRONTEND_URL') . "/subscription/failed?reason={$status}");
-}
-
-    // Handle redirect after payment (optional: can be frontend page that polls backend or shows success)
-    public function redirect(Request $request)
-    {
-        $status = $request->query('status');
-        $txRef = $request->query('tx_ref');
-        $txId = $request->query('transaction_id');
-
-        if ($status === 'successful') {
-            // Verify immediately or let webhook handle
-            // Redirect to frontend success page
-            return redirect('http://your-frontend.com/plans?success=1');
-        } else {
-            return redirect('http://your-frontend.com/plans?error=1');
         }
     }
 
 
     public function cancel(Request $request)
 {
-    $user = auth()->user();
-   return $sub = $user->subscription;
+        $subscription = Subscription::query()
+            ->where('userId', auth()->id())
+            ->where('status', 'active')
+            ->latest('subscriptionId')
+            ->first();
 
-    if (!$sub || $sub->status !== 'active') {
-        return response()->json(['error' => 'No active subscription'], 400);
-    }
+        if (!$subscription) {
+            return response()->json(['error' => 'No active subscription was found.'], 404);
+        }
 
-    $secretKey = config('services.flutterwave.secret_key');
-    $response = Http::withHeaders(['Authorization' => "Bearer $secretKey"])
-        ->put("https://api.flutterwave.com/v3/subscriptions/{$sub->flutterwave_subscription_id}/cancel");
-
-    if ($response->successful()) {
-        $sub->update(['status' => 'cancelled', 'endDate' => now()]);
-        $user->update(['planId' => 1]); // Downgrade
-        return response()->json(['success' => true]);
-    } else {
-        return response()->json(['error' => 'Failed to cancel'], 500);
-    }
+        return response()->json([
+            'error' => 'Self-service cancellation is not available for this subscription yet. Please contact support; your subscription has not been changed.',
+        ], 409);
 }
+
+    public function renew(Request $request, $subscriptionId, PaystackClient $paystack)
+    {
+        $user = auth()->user();
+        $subscription = Subscription::query()
+            ->where('subscriptionId', $subscriptionId)
+            ->where('userId', $user->id)
+            ->first();
+
+        if (!$subscription) {
+            return response()->json(['error' => 'Subscription not found.'], 404);
+        }
+
+        $now = Carbon::now();
+        $periodHasEnded =
+            ($subscription->endDate && $subscription->endDate <= $now) ||
+            ($subscription->nextBillingDate && $subscription->nextBillingDate <= $now);
+
+        if ($subscription->status === 'active' && !$periodHasEnded) {
+            return response()->json(['error' => 'This subscription is active and does not need renewal yet.'], 409);
+        }
+
+        if (
+            $subscription->status === 'cancelled' &&
+            $subscription->endDate &&
+            $subscription->endDate > $now
+        ) {
+            return response()->json(['error' => 'This subscription remains active until its current period ends.'], 409);
+        }
+
+        if ($subscription->status === 'past_due') {
+            if (!$subscription->endDate || $subscription->endDate <= $now) {
+                return response()->json(['error' => 'The payment grace period has ended. Choose a plan to start a new subscription.'], 409);
+            }
+
+            if ($subscription->provider !== 'paystack' || !$subscription->providerSubscriptionId) {
+                return response()->json(['error' => 'We could not open payment recovery for this subscription. Please contact support.'], 409);
+            }
+
+            if (!$paystack->isConfiguredForCurrentEnvironment()) {
+                return response()->json(['error' => 'Payment gateway credentials do not match this environment.'], 503);
+            }
+
+            $managementResponse = $paystack->getSubscriptionManagementLink($subscription->providerSubscriptionId);
+            $managementUrl = $managementResponse->json('data.link');
+
+            if (!$managementResponse->successful() || !$managementUrl) {
+                return response()->json(['error' => 'We could not open secure payment recovery. Please try again or contact support.'], 502);
+            }
+
+            return response()->json(['management_url' => $managementUrl]);
+        }
+
+        if (!in_array($subscription->status, ['expired', 'cancelled', 'failed'], true) && !$periodHasEnded) {
+            return response()->json(['error' => 'This subscription cannot be renewed in its current state.'], 409);
+        }
+
+        return $this->create($request, $subscription->planId, $paystack);
+    }
 
 public function activate(Request $request, $subscriptionId)
     {
+            if (!$this->isBillingAdmin()) {
+                return response()->json(['message' => 'Billing administrator access is required.'], 403);
+            }
+
         $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
 
         // Optional validation
@@ -246,8 +310,6 @@ public function activate(Request $request, $subscriptionId)
         // Optional: Update user's current_plan
         $subscription->user->update(['currentPlan' => $subscription->planId]);
 
-        // If Flutterwave integration needed, but since manual, perhaps skip or simulate
-
         Log::info("Subscription {$subscription->subscriptionId} manually activated", ['user_id' => $subscription->userId]);
         return response()->json([
             'message' => 'Subscription activated successfully',
@@ -258,6 +320,10 @@ public function activate(Request $request, $subscriptionId)
     // PATCH /subscriptions/{id}/deactivate
     public function deactivate(Request $request, $subscriptionId)
     {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
         $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
 
         // Optional validation
@@ -272,25 +338,6 @@ public function activate(Request $request, $subscriptionId)
         }
 
         $now = Carbon::now();
-
-        // If Flutterwave ID exists, cancel via API
-        if ($subscription->flutterwaveSubscriptionId) {
-            try {
-                $response = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . config('services.flutterwave.secret_key'),
-                ])->patch("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
-
-                if ($response->failed()) {
-                    Log::error('Flutterwave cancellation failed', ['response' => $response->json()]);
-                    return response()->json(['message' => 'Failed to cancel via Flutterwave'], 500);
-                }
-
-                $subscription->flutterwave_cancelled_at = $now;
-            } catch (\Exception $e) {
-                Log::error('Flutterwave API error', ['error' => $e->getMessage()]);
-                // Continue with local deactivation even if API fails, or abort based on policy
-            }
-        }
 
         // Deactivate
         $subscription->status = 'cancelled'; // Or 'expired' based on your schema
@@ -316,6 +363,10 @@ public function activate(Request $request, $subscriptionId)
     // PATCH /subscriptions/{id}/expire
     public function expire(Request $request, $subscriptionId)
     {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
         $subscription = Subscription::where('subscriptionId', $subscriptionId)->first();
 
         $request->validate([
@@ -332,7 +383,7 @@ public function activate(Request $request, $subscriptionId)
 
         $now = Carbon::now();
 
-        // Mark as expired locally without contacting Flutterwave (manual/admin expire)
+        // Mark as expired locally.
         $subscription->status = 'expired';
         $subscription->endDate = $now;
         $subscription->metadata = array_merge($subscription->metadata ?? [], [
@@ -359,6 +410,10 @@ public function activate(Request $request, $subscriptionId)
 
     public function assignManual(Request $request)
     {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
         $validated = $request->validate([
             'userId' => 'required|integer|exists:users,id',
             'planId' => 'required|integer|exists:plans,planId',
@@ -430,6 +485,10 @@ public function activate(Request $request, $subscriptionId)
 
     public function bulkAction(Request $request)
     {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
         $validated = $request->validate([
             'subscriptionIds' => 'required|array|min:1',
             'subscriptionIds.*' => 'integer|exists:subscriptions,subscriptionId',
@@ -481,5 +540,12 @@ public function activate(Request $request, $subscriptionId)
             'message' => 'Bulk action completed successfully',
             'updated' => $updated,
         ]);
+    }
+
+    private function isBillingAdmin(): bool
+    {
+        $role = strtoupper(trim((string) auth()->user()?->user_role?->roleName));
+
+        return in_array($role, ['ADMIN', 'SUPER_ADMIN', 'SUPERADMIN'], true);
     }
 }

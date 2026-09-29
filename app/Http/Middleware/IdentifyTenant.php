@@ -60,18 +60,23 @@ class IdentifyTenant
             return $next($request);
         }
 
-        // For non-admins, tenant ID is required
+        // Use the user's active default tenant when the client has not selected one.
         $tenantId = $request->header('X-Tenant-ID');
 
-        if (!$tenantId) {
-            return response()->json(['message' => 'Tenant ID is required.'], 400);
+        if ($tenantId) {
+            $tenant = $user->default_tenant()->where('tenantId', $tenantId)->first();
+        } else {
+            $tenant = $user->currently_active_tenant()
+                ->where('status', 'active')
+                ->first();
         }
 
-        // Validate that this tenant belongs to the user
-        $tenant = $user->default_tenant()->where('tenantId', $tenantId)->first();
-
         if (!$tenant) {
-            return response()->json(['message' => 'Invalid or unauthorized tenant.'], 403);
+            return response()->json([
+                'message' => $tenantId
+                    ? 'Invalid or unauthorized tenant.'
+                    : 'No active tenant is available for this user.',
+            ], $tenantId ? 403 : 400);
         }
 
         // Optional: Check if tenant is active
@@ -81,6 +86,7 @@ class IdentifyTenant
 
         // Bind tenant to request and container
         app()->instance('currentTenant', $tenant);
+        $request->headers->set('X-Tenant-ID', (string) $tenant->tenantId);
         $request->merge(['tenant' => $tenant]);
 
         return $next($request);

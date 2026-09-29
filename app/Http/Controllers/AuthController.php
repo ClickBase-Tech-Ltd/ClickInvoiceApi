@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use App\Models\User;
 use App\Models\Doctors;
@@ -345,10 +346,22 @@ class AuthController extends Controller
 
 public function signin(Request $request)
 {
-    $request->validate([
+    $request->merge([
+        'username' => $request->input('username', $request->input('email')),
+    ]);
+
+    $validator = Validator::make($request->all(), [
         'username' => 'required',
         'password' => 'nullable', // Allow empty password
     ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'status' => false,
+            'message' => 'The given data was invalid.',
+            'errors' => $validator->errors(),
+        ], 422);
+    }
 
     $user = User::with(['user_role'])
         ->where('email', $request->username)
@@ -441,7 +454,9 @@ public function signin(Request $request)
         'status'      => true,
         'message'     => 'Logged in',
         'accessToken' => $accessToken,
+        'access_token' => $accessToken,
         'refreshToken' => $refreshToken,
+        'refresh_token' => $refreshToken,
         'firstName'   => $user->firstName ?? '',
         'lastName'    => $user->lastName ?? '',
         'email'       => $user->email ?? '',
@@ -491,7 +506,9 @@ public function signin(Request $request)
         return response()->json([
             'message' => 'Token refreshed',
             'accessToken' => $newAccessToken,
+            'access_token' => $newAccessToken,
             'refreshToken' => $newRefreshToken,
+            'refresh_token' => $newRefreshToken,
         ])
             ->cookie('access_token', $newAccessToken, 60, null, null, true, true, false, 'strict')
             ->cookie('refresh_token', $newRefreshToken, 14 * 24 * 60, null, null, true, true, false, 'strict');

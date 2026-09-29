@@ -10,7 +10,16 @@ class Plans extends Model
     use HasFactory;
     public $table = 'plans';
     protected $primaryKey = 'planId';
-    protected $fillable = ['planName', 'price', 'currency', 'features', 'isPopular', 'tenantLimit', 'invoiceLimit', 'flutterwavePlanId'];
+    protected $fillable = ['planName', 'price', 'currency', 'features', 'isPopular', 'tenantLimit', 'invoiceLimit', 'paystackPlanCode', 'paystackTestPlanCode'];
+
+    protected $hidden = ['flutterwavePlanId'];
+
+    public function paystackPlanCodeForCurrentEnvironment(): ?string
+    {
+        return app()->environment('production')
+            ? $this->paystackPlanCode
+            : $this->paystackTestPlanCode;
+    }
 
     public function currency_detail()
     {

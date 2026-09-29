@@ -1,0 +1,179 @@
+name: Deploy ClickInvoice API
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clickinvoice-api-production
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, dom, gd, mbstring, pdo_mysql, pdo_sqlite, sqlite3, xml, zip
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run API tests
+        run: php artisan test
+
+  deploy:
+    name: Deploy API to production
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, dom, gd, mbstring, pdo_mysql, pdo_sqlite, sqlite3, xml, zip
+          coverage: none
+
+      - name: Install production dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Create release directory
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: ssh "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '/var/www/ClickInvoiceApi/releases/api-${GITHUB_SHA}'"
+
+      - name: Upload API release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync -az --delete \
+            --exclude='.env' \
+            --exclude='storage/' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.phpunit.cache' \
+            -e 'ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes' \
+            ./ "$DEPLOY_USER@$DEPLOY_HOST:/var/www/ClickInvoiceApi/releases/api-${GITHUB_SHA}/"
+
+      - name: Migrate, switch API, and smoke test
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
+          set -euo pipefail
+          sha="$1"
+          live=/var/www/ClickInvoiceApi
+          release="$live/releases/api-$sha"
+          site=$(readlink -f /etc/nginx/sites-enabled/api.clickinvoice.app)
+          site_backup="$site.pre-$sha"
+          site_temp="$site.new"
+
+          test -f "$release/artisan"
+          ln -sfn "$live/.env" "$release/.env"
+          ln -sfn "$live/storage" "$release/storage"
+          mkdir -p "$live/storage/app/public"
+          ln -sfn "$live/storage/app/public" "$release/public/storage"
+          chown -R www-data:www-data "$release"
+
+          cd "$release"
+          php artisan optimize:clear
+          php artisan config:cache
+          php artisan route:list --path=paystack
+          php artisan route:list --json | php -r '$routes=json_decode(stream_get_contents(STDIN), true) ?: []; foreach ($routes as $route) { if (stripos($route["uri"] ?? "", "flutterwave") !== false) { fwrite(STDERR, "Retired payment route still registered\n"); exit(1); } }'
+
+          backup_dir=/var/backups/clickinvoice-api
+          mkdir -p "$backup_dir"
+          chmod 700 "$backup_dir"
+          defaults_file=$(mktemp /root/.clickinvoice-mysql.XXXXXX)
+          chmod 600 "$defaults_file"
+          db_name=$(php -r '
+          require "vendor/autoload.php";
+          $app = require "bootstrap/app.php";
+          $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+          $db = config("database.connections.mysql");
+          $escape = static fn ($value) => str_replace(["\\", "\"", "\n", "\r"], ["\\\\", "\\\"", "\\n", "\\r"], (string) $value);
+          $contents = "[client]\n" . "host=\"" . $escape($db["host"]) . "\"\n" . "port=" . $db["port"] . "\n" . "user=\"" . $escape($db["username"]) . "\"\n" . "password=\"" . $escape($db["password"]) . "\"\n";
+          file_put_contents($argv[1], $contents);
+          chmod($argv[1], 0600);
+          echo $db["database"];
+          ' "$defaults_file")
+          backup="$backup_dir/${db_name}-$(date -u +%Y%m%d-%H%M%S)-${sha}-pre-deploy.sql.gz"
+          mysqldump --defaults-extra-file="$defaults_file" --single-transaction --quick --no-tablespaces --routines --triggers --events --databases "$db_name" | gzip -c > "$backup"
+          rm -f "$defaults_file"
+          chmod 600 "$backup"
+          gzip -t "$backup"
+          gzip -cd "$backup" | tail -c 1024 | grep -q 'Dump completed on'
+
+          php artisan migrate --force
+          php artisan optimize:clear
+          php artisan config:cache
+
+          old_root=$(awk '$1 == "root" { print $2; exit }' "$site")
+          case "$old_root" in
+            /var/www/ClickInvoiceApi/*/public|/var/www/ClickInvoiceApi/public) ;;
+            *) echo "Unexpected API document root: $old_root" >&2; exit 1 ;;
+          esac
+          cp -a "$site" "$site_backup"
+          sed "s#^    root $old_root;#    root $release/public;#" "$site" > "$site_temp"
+          install -o root -g root -m 0644 "$site_temp" "$site"
+          rm -f "$site_temp"
+          if ! nginx -t; then
+            cp -a "$site_backup" "$site"
+            nginx -t
+            exit 1
+          fi
+          systemctl reload nginx
+          switched=1
+          rollback() {
+            result=$?
+            if [ "$switched" -eq 1 ] && [ "$result" -ne 0 ]; then
+              cp -a "$site_backup" "$site"
+              nginx -t && systemctl reload nginx
+              echo "Health check failed; previous API root restored" >&2
+            fi
+          }
+          trap rollback EXIT
+
+          catalog_status=$(curl --connect-timeout 5 --max-time 20 -sS -o /tmp/clickinvoice-catalog.json -w '%{http_code}' https://api.clickinvoice.app/api/subscription-plans || true)
+          if [ "$catalog_status" != 200 ] || ! php -r '$data=json_decode(file_get_contents("/tmp/clickinvoice-catalog.json"), true); exit(is_array($data) ? 0 : 1);'; then
+            echo "Plan catalog smoke check failed: HTTP $catalog_status" >&2
+            exit 1
+          fi
+          webhook_status=$(curl --connect-timeout 5 --max-time 20 -sS -o /dev/null -w '%{http_code}' -X POST https://api.clickinvoice.app/api/paystack/webhook || true)
+          if [ "$webhook_status" != 401 ]; then
+            echo "Paystack webhook signature smoke check failed: HTTP $webhook_status" >&2
+            exit 1
+          fi
+          switched=0
+          trap - EXIT
+          echo "API deployment $sha passed health checks; backup: $backup"
+          REMOTE

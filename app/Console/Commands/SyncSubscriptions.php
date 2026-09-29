@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\Subscription;
-use Illuminate\Support\Facades\Http;
+use App\Services\PaystackClient;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -13,21 +13,29 @@ class SyncSubscriptions extends Command
     protected $signature = 'subscriptions:sync';
     protected $description = 'Daily sync and expiry check for subscriptions';
 
-    public function handle()
+    public function handle(PaystackClient $paystack)
     {
         $now = Carbon::now();
 
         // 1️⃣ Expire local subscriptions that have passed explicit endDate
         // or have reached their nextBillingDate when endDate is missing.
-        $expired = Subscription::where('status', 'active')
+        $expired = Subscription::whereIn('status', ['active', 'past_due'])
             ->where(function ($q) use ($now) {
-                $q->where(function ($q1) use ($now) {
-                    $q1->whereNotNull('endDate')
-                        ->where('endDate', '<', $now);
-                })->orWhere(function ($q2) use ($now) {
-                    $q2->whereNull('endDate')
-                        ->whereNotNull('nextBillingDate')
-                        ->where('nextBillingDate', '<', $now);
+                $q->where(function ($active) use ($now) {
+                    $active->where('status', 'active')
+                        ->where(function ($dates) use ($now) {
+                            $dates->where(function ($endDate) use ($now) {
+                                $endDate->whereNotNull('endDate')->where('endDate', '<=', $now);
+                            })->orWhere(function ($nextBilling) use ($now) {
+                                $nextBilling->whereNull('endDate')
+                                    ->whereNotNull('nextBillingDate')
+                                    ->where('nextBillingDate', '<=', $now);
+                            });
+                        });
+                })->orWhere(function ($grace) use ($now) {
+                    $grace->where('status', 'past_due')
+                        ->whereNotNull('endDate')
+                        ->where('endDate', '<=', $now);
                 });
             })
             ->get();
@@ -36,109 +44,72 @@ class SyncSubscriptions extends Command
             $subscription->status = 'expired';
             $subscription->save();
 
+            $user = $subscription->user;
+            if ($user) {
+                $hasAnotherEntitledSubscription = Subscription::query()
+                    ->where('userId', $user->id)
+                    ->where('subscriptionId', '!=', $subscription->subscriptionId)
+                    ->where(function ($query) use ($now) {
+                        $query->where(function ($active) use ($now) {
+                            $active->where('status', 'active')
+                                ->where(function ($dates) use ($now) {
+                                    $dates->whereNull('startDate')->orWhere('startDate', '<=', $now);
+                                })
+                                ->where(function ($dates) use ($now) {
+                                    $dates->whereNull('endDate')->orWhere('endDate', '>', $now);
+                                })
+                                ->where(function ($dates) use ($now) {
+                                    $dates->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', $now);
+                                });
+                        })->orWhere(function ($grace) use ($now) {
+                            $grace->where('status', 'past_due')
+                                ->whereNotNull('endDate')
+                                ->where('endDate', '>', $now);
+                        });
+                    })
+                    ->exists();
+
+                if (!$hasAnotherEntitledSubscription) {
+                    $user->update(['currentPlan' => 1]);
+                }
+            }
+
             // $this->info("Expired subscription ID: {$subscription->subscriptionId}");
             Log::channel('daily')->info("Expired subscription ID: {$subscription->subscriptionId}");
-    
         }
 
-        // 2️⃣ (Optional but recommended) Reconcile with Flutterwave
-        $activeSubs = Subscription::whereIn('status', ['active', 'expired'])
-            ->whereNotNull('flutterwaveSubscriptionId')
+        $paystackSubscriptionsToDisable = Subscription::query()
+            ->where('provider', 'paystack')
+            ->where('status', 'expired')
+            ->whereNotNull('providerSubscriptionId')
+            ->whereNotNull('providerSubscriptionEmailToken')
+            ->whereNull('providerSubscriptionDisabledAt')
             ->get();
 
-        foreach ($activeSubs as $subscription) {
-            $this->syncWithFlutterwave($subscription);
+        foreach ($paystackSubscriptionsToDisable as $subscription) {
+            try {
+                $response = $paystack->disableSubscription(
+                    $subscription->providerSubscriptionId,
+                    $subscription->providerSubscriptionEmailToken
+                );
+
+                if ($response->successful()) {
+                    $subscription->update(['providerSubscriptionDisabledAt' => $now]);
+                } else {
+                    Log::warning('Paystack subscription disable failed after grace expiry', [
+                        'subscription_id' => $subscription->subscriptionId,
+                        'provider_status' => $response->status(),
+                    ]);
+                }
+            } catch (\Throwable $exception) {
+                Log::warning('Paystack subscription disable request failed after grace expiry', [
+                    'subscription_id' => $subscription->subscriptionId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         }
 
-        // $this->info('Subscription sync completed.');
         Log::channel('daily')->info("Subscription sync completed.");
-
-    }
-
-   private function syncWithFlutterwave(Subscription $subscription)
-{
-    // 1️⃣ Check if Flutterwave subscription ID exists
-    if (!$subscription->flutterwaveSubscriptionId) {
-        Log::channel('daily')->error("No Flutterwave Subscription ID for subscription {$subscription->subscriptionId}");
-        return;
-    }
-
-    Log::info("FlutterwaveSubscriptionId: {$subscription->flutterwaveSubscriptionId}");
-    $secretKey = config('services.flutterwave.secret_key');
-
-    $getUserEmail = $subscription->user ? $subscription->user->email : 'unknown';
-    Log::info("Fetching Flutterwave subscription for user: {$getUserEmail}");
-    // 2️⃣ Fetch subscription(s) from Flutterwave using the subscription ID
-    $response = Http::withHeaders([
-            'Authorization' => "Bearer $secretKey"
-        ])->get("https://api.flutterwave.com/v3/subscriptions?email={$getUserEmail}");
-
-    // 3️⃣ Log raw response for debugging
-    Log::info('Flutterwave response', ['raw' => $response->body()]);
-
-    if (!$response->successful()) {
-        $this->error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}");
-        Log::error("Failed Flutterwave sync for subscription {$subscription->subscriptionId}", [
-            'status' => $response->status(),
-            'body' => $response->body(),
-        ]);
-        return;
-    }
-
-    // 4️⃣ Get the list of subscriptions from response
-    $subscriptions = $response->json('data', []); // defaults to empty array if 'data' is missing
-    Log::info('Flutterwave subscriptions data', ['subscription' => $subscription, 'data' => $subscriptions]);
-    // 5️⃣ Loop through Flutterwave subscriptions (usually only one, but API returns an array)
-    foreach ($subscriptions as $fwSub) {
-        $flutterwaveStatus = $fwSub['status'] ?? null; // active | cancelled | completed
-
-        Log::info('Flutterwave subscription status', [
-            'fw_subscription_id' => $fwSub['id'] ?? null,
-            'status' => $flutterwaveStatus,
-            'email' => $fwSub['customer']['email'] ?? null,
-        ]);
-
-        // 6️⃣ Flutterwave cancelled/completed → update locally
-        if (in_array($flutterwaveStatus, ['cancelled', 'completed']) 
-            && $subscription->status !== 'cancelled') {
-
-            $subscription->status = 'cancelled';
-            $subscription->save();
-
-            $this->info("Subscription {$subscription->subscriptionId} cancelled via Flutterwave");
-            return; // no need to continue after local update
-        }
-
-        // 7️⃣ Local expiry → cancel on Flutterwave (once)
-        if (
-            $subscription->status === 'expired' &&
-            $flutterwaveStatus === 'active' &&
-            $subscription->flutterwaveCancelledAt === null
-        ) {
-            $this->cancelOnFlutterwave($subscription);
-
-            $this->info("Cancelled Flutterwave subscription for {$subscription->subscriptionId}");
-        }
-    }
-}
-
-
-
-
-private function cancelOnFlutterwave(Subscription $subscription)
-{
-      if ($subscription->flutterwaveCancelledAt !== null) {
-        return;
-    }
-    if (!$subscription->flutterwaveSubscriptionId) {
-        return;
-    }
-
-    Http::withHeaders(['Authorization' => "Bearer " . config('services.flutterwave.secret_key')])
-        ->post("https://api.flutterwave.com/v3/subscriptions/{$subscription->flutterwaveSubscriptionId}/cancel");
-
-        $subscription->flutterwaveCancelledAt = now();
-        $subscription->save();
 }
 
 

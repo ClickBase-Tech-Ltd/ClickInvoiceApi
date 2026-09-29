@@ -50,7 +50,6 @@ use App\Models\PaymentGateway;
 use App\Models\Plans;
 use Tymon\JWTAuth\Claims\Custom;
 use App\Http\Controllers\SubscriptionController;
-use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\SupportController;
 use App\Http\Controllers\PlansController;
 
@@ -323,7 +322,3 @@ Route::prefix('receipts')->group(function () {
     Route::get('/{id}/generate-pdf', [InvoicePdfController::class, 'generate']);
     Route::post('/{id}/send-email', [InvoicePdfController::class, 'sendReceiptEmail']);
 });
-
-Route::post('/flutterwave/webhook', [WebhookController::class, 'handle']);
-Route::get('/subscription/verify-redirect', [SubscriptionController::class, 'verifyRedirect']);
-

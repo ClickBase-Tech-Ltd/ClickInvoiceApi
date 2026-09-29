@@ -50,7 +50,7 @@ use App\Models\PaymentGateway;
 use App\Models\Plans;
 use Tymon\JWTAuth\Claims\Custom;
 use App\Http\Controllers\SubscriptionController;
-use App\Http\Controllers\WebhookController;
+use App\Http\Controllers\PaystackWebhookController;
 use App\Http\Controllers\SupportController;
 use App\Http\Controllers\PlansController;
 use App\Http\Controllers\AdminDashboardController;
@@ -58,6 +58,7 @@ use App\Http\Controllers\ReferralController;
 use App\Http\Controllers\AdminLoginActivityController;
 use App\Http\Controllers\InAppNotificationController;
 use App\Http\Controllers\PushSubscriptionController;
+use Carbon\Carbon;
 
 /*
 |--------------------------------------------------------------------------
@@ -111,6 +112,74 @@ Route::middleware(['auth.jwt'])->group(function () {
     Route::post('/referrals/generate', [ReferralController::class, 'generate']);
     Route::get('/referrals/me', [ReferralController::class, 'me']);
 
+    Route::get('/user', function () {
+        $user = auth()->user();
+
+        return response()->json([
+            'user' => [
+                'id' => $user->id,
+                'full_name' => trim($user->firstName . ' ' . $user->lastName . ' ' . ($user->otherNames ?? '')),
+                'role' => $user->user_role->roleName ?? null,
+                'phoneNumber' => $user->phoneNumber,
+                'email' => $user->email,
+                'default_tenant' => $user->default_tenant,
+                'tenantId' => $user->currently_active_tenant->tenantId ?? ($user->default_tenant->first()->tenantId ?? ''),
+                'user_plan' => $user->current_plan->planName ?? "",
+            ]
+        ]);
+    });
+
+    Route::get('/plans', function () {
+        $user = auth()->user();
+        $now = Carbon::now();
+        $userSubscriptions = $user
+            ? \App\Models\Subscription::where('userId', $user->id)
+                ->orderByDesc('subscriptionId')
+                ->get()
+                ->groupBy('planId')
+            : collect();
+
+        $plans = Plans::orderBy('planId')
+            ->with('currency_detail')
+            ->get()
+            ->map(function ($plan) use ($userSubscriptions, $now) {
+                $history = $userSubscriptions->get($plan->planId, collect());
+                $latestSubscription = $history->first();
+                $currentSubscription = $history->first(function ($subscription) use ($now) {
+                    if ($subscription->startDate && $subscription->startDate > $now) {
+                        return false;
+                    }
+
+                    if ($subscription->status === 'past_due') {
+                        return $subscription->endDate && $subscription->endDate > $now;
+                    }
+
+                    return $subscription->status === 'active'
+                        && (!$subscription->endDate || $subscription->endDate > $now)
+                        && (!$subscription->nextBillingDate || $subscription->nextBillingDate > $now);
+                });
+                $displaySubscription = $currentSubscription ?? $latestSubscription;
+                $status = $displaySubscription?->status;
+
+                if (
+                    $status === 'active' && !$currentSubscription ||
+                    $status === 'past_due' && (!$currentSubscription || !$currentSubscription->endDate || $currentSubscription->endDate <= $now)
+                ) {
+                    $status = 'expired';
+                }
+
+                $plan->is_subscribed = (bool) $currentSubscription;
+                $plan->subscription_status = $status;
+                $plan->subscription_ends_at = $displaySubscription?->endDate
+                    ?? $displaySubscription?->nextBillingDate;
+                $plan->subscription_id = $displaySubscription?->subscriptionId;
+
+                return $plan;
+            });
+
+        return response()->json($plans);
+    });
+
     Route::post('/push/subscribe', [PushSubscriptionController::class, 'subscribe']);
     Route::delete('/push/subscribe', [PushSubscriptionController::class, 'unsubscribe']);
     Route::patch('/push/preferences', [PushSubscriptionController::class, 'updatePreferences']);
@@ -141,49 +210,6 @@ Route::get('/admin/currency-distribution', [InvoiceController::class, 'currencyD
 
 Route::get('/users', [UsersController::class, 'index']);
 Route::middleware(['auth.jwt', 'tenant'])->group(function () {
-
-    Route::get('/user', function () {
-        $user = auth()->user(); // Use the 'api' guard for JWT
-
-        return response()->json([
-            'user' => [
-                // 'id' => (string) $user->id,
-                'id' => $user->id,
-                'full_name' => trim($user->firstName . ' ' . $user->lastName . ' ' . ($user->otherNames ?? '')),
-                'role' => $user->user_role->roleName ?? null,
-                'phoneNumber' => $user->phoneNumber,
-                'email' => $user->email,
-                'default_tenant' => $user->default_tenant,
-                'tenantId' => $user->currently_active_tenant->tenantId ?? '',
-                'user_plan' => $user->current_plan->planName ?? "",
-            ]
-        ]);
-    });
-
-// Route::get('/plans', function(){
-//     $plans = Plans::orderBy('planId')->with('currency_detail', 'isSubscribed')->get();
-//     return response()->json($plans);
-// });
-
-Route::get('/plans', function () {
-    $user = auth()->user();
-
-    $plans = Plans::orderBy('planId')
-        ->with('currency_detail')
-        ->get()
-        ->map(function ($plan) use ($user) {
-            $plan->is_subscribed = $user
-                ? $plan->subscriptions()
-                    ->where('userId', $user->id)
-                    ->where('status', 'active')
-                    ->exists()
-                : false;
-
-            return $plan;
-        });
-
-    return response()->json($plans);
-    });
 
     Route::post('/subscription-plans', [PlansController::class, 'store']);
     Route::patch('/subscription-plans/{planId}', [PlansController::class, 'update']);
@@ -324,6 +350,8 @@ Route::get('/plans', function () {
 
     Route::get('/subscribers', [SubscriptionController::class, 'index']);
     Route::get('/my-subscriptions', [SubscriptionController::class, 'mySubscriptions']);
+    Route::get('/subscription/paystack/verify', [SubscriptionController::class, 'verifyPaystackPayment']);
+    Route::post('/subscriptions/{subscriptionId}/renew', [SubscriptionController::class, 'renew']);
 
     // Support Routes
     Route::get('/support/tickets', [SupportController::class, 'index']);
@@ -362,8 +390,7 @@ Route::prefix('receipts')->group(function () {
     Route::post('/{id}/send-email', [InvoicePdfController::class, 'sendReceiptEmail']);
 });
 
-Route::post('/flutterwave/webhook', [WebhookController::class, 'handle']);
-Route::get('/subscription/verify-redirect', [SubscriptionController::class, 'verifyRedirect']);
+Route::post('/paystack/webhook', [PaystackWebhookController::class, 'handle']);
 
 Route::middleware(['auth.jwt'])->group(function () {
     Route::get('/admin/dashboard-counts', [AdminDashboardController::class, 'dashboardCounts']);

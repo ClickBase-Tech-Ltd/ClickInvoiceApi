@@ -24,7 +24,11 @@ class Subscription extends Model
     protected $fillable = [
         'userId',
         'planId',
-        'flutterwaveSubscriptionId',
+        'provider',
+        'providerSubscriptionId',
+        'providerCustomerCode',
+        'providerSubscriptionEmailToken',
+        'providerSubscriptionDisabledAt',
         'status',
         'startDate',
         'nextBillingDate',
@@ -37,7 +41,14 @@ class Subscription extends Model
         'nextBillingDate'  => 'datetime',
         'endDate'          => 'datetime',
         'metadata'         => 'array',
-        'flutterwaveCancelledAt' => 'datetime',
+        'providerSubscriptionEmailToken' => 'encrypted',
+        'providerSubscriptionDisabledAt' => 'datetime',
+    ];
+
+    protected $hidden = [
+        'flutterwaveSubscriptionId',
+        'flutterwaveCancelledAt',
+        'providerSubscriptionEmailToken',
     ];
 
     /*

@@ -2,18 +2,21 @@
 namespace App\Http\Controllers;
 
 use App\Models\Plans;
+use App\Services\PaystackClient;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Request;
 
 class PlansController extends Controller
 {
-public function store(Request $request)
+public function store(Request $request, PaystackClient $paystack)
 {
+    if (!$this->isBillingAdmin()) {
+        return response()->json(['message' => 'Billing administrator access is required.'], 403);
+    }
 
-    $validatedData = request()->validate([
+    $validatedData = $request->validate([
         'planName'      => 'required|string|max:255',
-        'price'         => 'required|numeric',
+        'price'         => 'required|numeric|min:0.01',
         'currency'      => 'required|integer|exists:currencies,currencyId',
         'features'      => 'required|string',
         'isPopular'     => 'required|boolean',
@@ -22,52 +25,43 @@ public function store(Request $request)
     ]);
 
     
-    return DB::transaction(function () use ($validatedData) {
-        $getCurrency = DB::table('currencies')->where('currencyId', $validatedData['currency'])->first();
+    if (!$paystack->isConfiguredForCurrentEnvironment()) {
+        return response()->json(['message' => 'Paystack is not configured.'], 503);
+    }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1. Create Plan on Flutterwave
-        |--------------------------------------------------------------------------
-        */
-         $flutterwaveResponse = Http::withToken(env('FLUTTERWAVE_SECRET_KEY'))
-            ->post('https://api.flutterwave.com/v3/payment-plans', [
-                'name'     => $validatedData['planName'],
-                'amount'   => $validatedData['price'],
-                'currency' => $getCurrency->currencyCode, // or map from your currencies table
-                'interval' => 'monthly', // adjust if dynamic
-            ]);
+    $getCurrency = DB::table('currencies')->where('currencyId', $validatedData['currency'])->first();
+    $response = $paystack->createPlan(
+        $validatedData['planName'],
+        (int) round(((float) $validatedData['price']) * 100),
+        $getCurrency->currencyCode,
+        'monthly'
+    );
 
-        if (!$flutterwaveResponse->successful()) {
-            throw new \Exception(
-                $flutterwaveResponse->json('message') ?? 'Failed to create plan on Flutterwave'
-            );
-        }
+    $planCode = $response->json('data.plan_code');
+    if (!$response->successful() || !$planCode) {
+        return response()->json(['message' => 'Paystack could not create this subscription plan.'], 502);
+    }
 
-        $flutterwavePlanId = $flutterwaveResponse->json('data.id');
+    $planCodeField = app()->environment('production') ? 'paystackPlanCode' : 'paystackTestPlanCode';
+    $validatedData[$planCodeField] = $planCode;
+    $plan = Plans::create($validatedData);
 
-        /*
-        |--------------------------------------------------------------------------
-        | 2. Store Plan Locally
-        |--------------------------------------------------------------------------
-        */
-        $validatedData['flutterwavePlanId'] = $flutterwavePlanId;
-        $plan = Plans::create($validatedData);
-
-        return response()->json([
-            'message' => 'Plan created successfully',
-            'plan'    => $plan
-        ], 201);
-    });
+    return response()->json([
+        'message' => 'Plan created successfully',
+        'plan' => $plan,
+    ], 201);
 }
 
 
-
-public function update(Request $request, $planId)
+public function update(Request $request, $planId, PaystackClient $paystack)
 {
+    if (!$this->isBillingAdmin()) {
+        return response()->json(['message' => 'Billing administrator access is required.'], 403);
+    }
+
     $validatedData = $request->validate([
         'planName'      => 'sometimes|required|string|max:255',
-        'price'         => 'sometimes|required|numeric',
+        'price'         => 'sometimes|required|numeric|min:0.01',
         'currency'      => 'sometimes|required|integer|exists:currencies,currencyId',
         'features'      => 'sometimes|required|string',
         'isPopular'     => 'sometimes|required|boolean',
@@ -75,56 +69,48 @@ public function update(Request $request, $planId)
         'invoiceLimit'  => 'sometimes|required|integer',
     ]);
 
-    return DB::transaction(function () use ($validatedData, $planId) {
+    $plan = Plans::with('currency_detail')->findOrFail($planId);
+    $planCodeField = app()->environment('production') ? 'paystackPlanCode' : 'paystackTestPlanCode';
+    $billingTermsChanged =
+        (isset($validatedData['planName']) && $validatedData['planName'] !== $plan->planName) ||
+        (isset($validatedData['price']) && (float) $validatedData['price'] !== (float) $plan->price) ||
+        (isset($validatedData['currency']) && (int) $validatedData['currency'] !== (int) $plan->currency);
 
-        $plan = Plans::findOrFail($planId);
-
-        if (!$plan->flutterwavePlanId) {
-            throw new \Exception('Flutterwave plan ID not found for this plan.');
+    if (!$plan->{$planCodeField} || $billingTermsChanged) {
+        if (!$paystack->isConfiguredForCurrentEnvironment()) {
+            return response()->json(['message' => 'Paystack is not configured.'], 503);
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | 1. Update plan on Flutterwave (ONLY allowed fields)
-        |--------------------------------------------------------------------------
-        */
-        $flutterwavePayload = [];
+        $currency = isset($validatedData['currency'])
+            ? DB::table('currencies')->where('currencyId', $validatedData['currency'])->first()
+            : $plan->currency_detail;
+        $response = $paystack->createPlan(
+            $validatedData['planName'] ?? $plan->planName,
+            (int) round(((float) ($validatedData['price'] ?? $plan->price)) * 100),
+            $currency->currencyCode,
+            'monthly'
+        );
 
-        if (isset($validatedData['planName'])) {
-            $flutterwavePayload['name'] = $validatedData['planName'];
+        $planCode = $response->json('data.plan_code');
+        if (!$response->successful() || !$planCode) {
+            return response()->json(['message' => 'Paystack could not update this subscription plan.'], 502);
         }
 
-        if (isset($validatedData['price'])) {
-            $flutterwavePayload['amount'] = $validatedData['price'];
-        }
+        $validatedData[$planCodeField] = $planCode;
+    }
 
-        if (!empty($flutterwavePayload)) {
-            $flutterwaveResponse = Http::withToken(env('FLUTTERWAVE_SECRET_KEY'))
-                ->put(
-                    "https://api.flutterwave.com/v3/payment-plans/{$plan->flutterwavePlanId}",
-                    $flutterwavePayload
-                );
+    $plan->update($validatedData);
 
-            if (!$flutterwaveResponse->successful()) {
-                throw new \Exception(
-                    $flutterwaveResponse->json('message') ?? 'Failed to update Flutterwave plan'
-                );
-            }
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | 2. Update local plan
-        |--------------------------------------------------------------------------
-        */
-        $plan->update($validatedData);
-
-        return response()->json([
-            'message' => 'Plan updated successfully',
-            'plan'    => $plan
-        ]);
-    });
+    return response()->json([
+        'message' => 'Plan updated successfully',
+        'plan' => $plan->fresh(),
+    ]);
 }
 
+private function isBillingAdmin(): bool
+{
+    $role = strtoupper(trim((string) auth()->user()?->user_role?->roleName));
 
+    return in_array($role, ['ADMIN', 'SUPER_ADMIN', 'SUPERADMIN'], true);
+}
 }

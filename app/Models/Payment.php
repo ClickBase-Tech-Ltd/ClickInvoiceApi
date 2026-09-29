@@ -13,8 +13,10 @@ class Payment extends Model
 
     protected $fillable = [
         'subscriptionId',
-        'flutterwaveTxRef',
-        'flutterwaveTxId',
+        'provider',
+        'providerReference',
+        'providerTransactionId',
+        'userId',
         'amount',
         'currency',
         'status',
@@ -24,6 +26,11 @@ class Payment extends Model
     protected $casts = [
         'amount'        => 'decimal:2',
         'responseData'  => 'array',
+    ];
+
+    protected $hidden = [
+        'flutterwaveTxRef',
+        'flutterwaveTxId',
     ];
 
     /*

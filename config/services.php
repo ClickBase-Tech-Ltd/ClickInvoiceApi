@@ -39,10 +39,10 @@ return [
         'api_url' => env('MONIEPOINT_API_URL', 'https://api.pos.moniepoint.com/v1/transactions'),
     ],
 
-    'flutterwave' => [
-        'public_key' => env('FLUTTERWAVE_PUBLIC_KEY'),
-        'secret_key' => env('FLUTTERWAVE_SECRET_KEY'),
-        'webhook_secret' => env('FLUTTERWAVE_WEBHOOK_SECRET'),
+    'paystack' => [
+        'public_key' => env('PAYSTACK_PUBLIC_KEY'),
+        'secret_key' => env('PAYSTACK_SECRET_KEY'),
+        'renewal_grace_days' => max(0, (int) env('PAYSTACK_RENEWAL_GRACE_DAYS', 3)),
     ],
 
     'webpush' => [

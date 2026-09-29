@@ -9,6 +9,7 @@ use Illuminate\Notifications\Notifiable;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 // Add this import
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Carbon\Carbon;
 
 class User extends Authenticatable implements JWTSubject
 {
@@ -170,7 +171,32 @@ public function canCreateTenant(): bool
 
     public function canCreateInvoice(): bool
 {
-    $plan = $this->plan;
+    $now = Carbon::now();
+    $activePaidSubscription = $this->subscriptions()
+        ->where('status', 'active')
+        ->where(function ($query) use ($now) {
+            $query->whereNull('startDate')
+                ->orWhere('startDate', '<=', $now);
+        })
+        ->where(function ($query) use ($now) {
+            $query->whereNull('endDate')
+                ->orWhere('endDate', '>', $now);
+        })
+        ->where(function ($query) use ($now) {
+            $query->whereNull('nextBillingDate')
+                ->orWhere('nextBillingDate', '>', $now);
+        })
+        ->whereHas('plan', function ($query) {
+            $query->where('planId', '>', 1);
+        })
+        ->with('plan')
+        ->latest('subscriptionId')
+        ->first();
+
+    $plan = $activePaidSubscription?->plan;
+    if (!$plan && (int) $this->currentPlan <= 1) {
+        $plan = $this->plan;
+    }
 
     // No plan assigned → deny by default
     if (!$plan) {

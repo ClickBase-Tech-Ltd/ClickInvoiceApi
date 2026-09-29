@@ -232,18 +232,34 @@ class InvoiceController extends Controller
         ], 400);
     }
 
-    $q = Invoice::with([
-            'items',
-            'currencyDetail',
-            'customer',
-        ])
+    $q = Invoice::query()
         ->where('tenantId', $tenantId);
 
     if (! $this->invoiceAuth->isTenantSupervisor($user, $tenantId)) {
         $q->where('createdBy', $userId);
     }
 
-    $invoices = $q->latest()
+    $invoices = $q
+        ->select([
+            'invoiceNumber',
+            'invoiceId',
+            'userGeneratedInvoiceId',
+            'projectName',
+            'invoiceDate',
+            'amountPaid',
+            'balanceDue',
+            'status',
+            'tenantId',
+            'createdBy',
+            'currency',
+            'customerId',
+            'created_at',
+        ])
+        ->with([
+            'currencyDetail:currencyId,currencySymbol,currencyCode',
+            'customer:customerId,customerName',
+        ])
+        ->orderByDesc('created_at')
         ->limit(5)
         ->get();
 
@@ -287,38 +303,38 @@ public function invoiceSummary(Request $request)
         ], 400);
     }
 
-    // 1. Get the aggregated amounts
-    $amounts = Invoice::where('tenantId', $tenantId)
+    $summary = Invoice::where('tenantId', $tenantId)
         ->where('createdBy', $userId)
         ->selectRaw('
-            COALESCE(SUM(amountPaid), 0) AS collected,
-            COALESCE(SUM(balanceDue), 0) AS outstanding
+            COALESCE(SUM(CAST(amountPaid AS DECIMAL(15, 2))), 0) AS collected,
+            COALESCE(SUM(CAST(balanceDue AS DECIMAL(15, 2))), 0) AS outstanding
         ')
+        ->selectSub(function ($query) use ($tenantId, $userId) {
+            $query->from('invoices as latest_invoice')
+                ->join('currencies', 'latest_invoice.currency', '=', 'currencies.currencyId')
+                ->where('latest_invoice.tenantId', $tenantId)
+                ->where('latest_invoice.createdBy', $userId)
+                ->orderByDesc('latest_invoice.created_at')
+                ->limit(1)
+                ->select('currencies.currencyCode');
+        }, 'currency_code')
+        ->selectSub(function ($query) use ($tenantId, $userId) {
+            $query->from('invoices as latest_invoice')
+                ->join('currencies', 'latest_invoice.currency', '=', 'currencies.currencyId')
+                ->where('latest_invoice.tenantId', $tenantId)
+                ->where('latest_invoice.createdBy', $userId)
+                ->orderByDesc('latest_invoice.created_at')
+                ->limit(1)
+                ->select('currencies.currencySymbol');
+        }, 'currency_symbol')
         ->first();
-
-    // 2. Get currency from any one invoice (preferably the latest)
-    $currencyInfo = Invoice::where('tenantId', $tenantId)
-        ->where('createdBy', $userId)
-        ->join('currencies', 'invoices.currency', '=', 'currencies.currencyId')
-        ->select('currencies.currencyCode AS currency_code', 'currencies.currencySymbol AS currency_symbol')
-        ->orderBy('invoices.created_at', 'desc') // get from most recent invoice
-        ->first();
-
-    // If no invoices exist
-    if (!$amounts) {
-        return response()->json([
-            'collected'       => 0.0,
-            'outstanding'     => 0.0,
-            'currency_code'   => 'USD',
-            'currency_symbol' => '$',
-        ]);
-    }
 
     return response()->json([
-        'collected'       => (float) $amounts->collected,
-        'outstanding'     => (float) $amounts->outstanding,
-        'currency_code'   => $currencyInfo?->currency_code ?? 'USD',
-        'currency_symbol' => $currencyInfo?->currency_symbol ?? $this->getFallbackSymbol($currencyInfo?->currency_code ?? 'USD'),
+        'collected' => (float) ($summary->collected ?? 0),
+        'outstanding' => (float) ($summary->outstanding ?? 0),
+        'currency_code' => $summary->currency_code ?? 'USD',
+        'currency_symbol' => $summary->currency_symbol
+            ?? $this->getFallbackSymbol($summary->currency_code ?? 'USD'),
     ]);
 }
 

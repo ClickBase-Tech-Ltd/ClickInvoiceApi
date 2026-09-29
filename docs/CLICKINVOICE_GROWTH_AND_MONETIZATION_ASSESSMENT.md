@@ -12,9 +12,9 @@
 
 ## 1. Executive summary
 
-ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenant businesses, customers, invoices, receipts, PDF generation, email flows, admin analytics, support tickets, referral hooks, and **subscription billing via Flutterwave** (payment plans + webhooks). The **landing site** is aggressively built for **SEO** (many country- and intent-specific URLs) and pulls **live plan data** from the API.
+ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenant businesses, customers, invoices, receipts, PDF generation, email flows, admin analytics, support tickets, referral hooks, and **Paystack subscription billing** (hosted checkout + webhooks). The **landing site** is aggressively built for **SEO** (many country- and intent-specific URLs) and pulls **live plan data** from the API.
 
-**You can make money quickly** because the **paid path already exists**: authenticated users can subscribe through `/subscribe/{planId}`, receive a **Flutterwave payment link**, and activation is driven by **webhooks**. Speed to revenue is therefore less about “building payments” and more about **configuration correctness** (Flutterwave plan IDs, secrets, `FRONTEND_URL`), **funnel and positioning**, **trust/compliance messaging**, and **operational reliability** (uptime, PDF/email, network access).
+**The paid path exists**: authenticated users can subscribe through `/subscribe/{planId}`, receive a **Paystack-hosted checkout link**, and activation is verified server-side. Checkout readiness depends on correct Paystack plan codes, secrets, `FRONTEND_URL`, **funnel and positioning**, **trust/compliance messaging**, and **operational reliability** (uptime, PDF/email, network access).
 
 **Fast growth** is constrained less by missing a “v1 invoice app” and more by:
 
@@ -46,7 +46,7 @@ ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenan
 |-----------|-------------|
 | **Stack** | Laravel **12**, PHP **8.2**, **JWT** (`tymon/jwt-auth`), **Sanctum** present, **Dompdf**, **Excel** export |
 | **Core domain** | Users, roles, tenants, currencies, **plans**, **subscriptions**, **payments**, customers, invoices, invoice items, receipts, PDF + email, support tickets, referrals, admin dashboard aggregates |
-| **Billing integration** | **Flutterwave** — `SubscriptionController@create` calls `api.flutterwave.com/v3/payments` with `payment_plan`; **`WebhookController`** verifies `verif-hash` against `FLUTTERWAVE_WEBHOOK_SECRET` |
+| **Billing integration** | **Paystack** — subscription checkout is hosted; transaction verification and signed webhook handling are implemented in the Paystack services/controllers |
 | **Public plan APIs** | `GET /subscription-plans`, `GET /payment-gateways`, `GET /currencies` (used by marketing and onboarding) |
 | **Legacy / breadth** | `routes/api.php` imports many controllers unrelated to invoicing (e.g. training/social-style domain), and models exist for posts, lessons, etc. This **increases cognitive load and risk** when changing shared auth or middleware |
 
@@ -64,7 +64,7 @@ ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenan
 | **Contact / partners** | API routes for contact and partner submissions (`nodemailer`) |
 | **README** | Still themed as a **dSign / ThemeWagon** template — **not** aligned with ClickInvoice branding or deploy instructions |
 
-**Critical GTM note:** `app/integrations/page.tsx` describes **Stripe, PayPal, QuickBooks, Xero, Zapier**. In the scanned API, **subscription collection is Flutterwave-centric**; deep accounting sync is **not evidenced** in the same way. This is a **trust and conversion risk** if prospects expect native integrations.
+**Critical GTM note:** `app/integrations/page.tsx` describes **Stripe, PayPal, QuickBooks, Xero, Zapier**. Subscription collection uses Paystack; deep accounting sync is **not evidenced** in the same way. This is a **trust and conversion risk** if prospects expect native integrations.
 
 ---
 
@@ -80,11 +80,11 @@ ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenan
 
 ### 3.2 Monetization stack
 
-1. **Plans** live in DB (`plans` table, migrations for `flutterwave_plan_id`).
+1. **Plans** live in DB (`plans` table); new recurring checkout uses Paystack plan codes.
 2. User’s **`currentPlan`** is updated on successful webhook processing.
 3. **Landing pricing** can stay in sync with the app **if** the API’s public plan list and feature strings are maintained.
 
-**Velocity of revenue:** Once Flutterwave **plan IDs**, **keys**, and **webhook URL** are correct in production, new paying customers can be acquired **immediately** through existing UI and landing CTAs. There is no need to wait for a greenfield “billing v2” to start collecting subscription MRR.
+**Velocity of revenue:** Once Paystack **plan codes**, **keys**, and **webhook URL** are configured and the release is deployed, new paying customers can subscribe through the existing UI and landing CTAs.
 
 ### 3.3 Technical risks that directly hurt growth
 
@@ -94,7 +94,7 @@ ClickInvoice is a **mature-featured SMB invoicing product** in code: multi-tenan
 | **Schema drift** | Missing columns caused production errors; users churn after first failed invoice. |
 | **PDF / server deps** | Dompdf requires **GD** etc.; missing extensions cause **500s** at “download invoice” — high-intent moment. |
 | **`ignoreBuildErrors: true`** | Shipping TS errors **masks regressions**; velocity feels fast until quality collapses. |
-| **Redirect / URL consistency** | API `SubscriptionController@verifyRedirect` redirects to paths like `/subscription/success` while the app implements **`/dashboard/subscription/success`**. Depending on which redirect Flutterwave or middleware uses, users may hit **dead routes** — worth validating in QA. |
+| **Redirect / URL consistency** | Checkout return paths must match the static frontend routes; verify the customer flow in QA. |
 | **Webhook cancellation handler** | Cancellation path updates `plan_id` on user in one branch; user model emphasizes **`currentPlan`** — verify DB column names and mass-assignment so **downgrades** apply correctly. |
 | **Marketing vs product** | Over-claiming integrations **increases refunds, chargebacks, and bad reviews**. |
 
@@ -106,9 +106,9 @@ Below is prioritized for **impact / effort** for a SMB invoicing SaaS.
 
 ### 4.1 Revenue infrastructure (highest ROI, short time)
 
-- **Single source of truth for env** across Landing, App, API: document `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_SIGNUP`, `NEXT_PUBLIC_FILE_URL`, `FRONTEND_URL`, Flutterwave keys, webhook secret, mail.
+- **Single source of truth for env** across Landing, App, API: document `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_SIGNUP`, `NEXT_PUBLIC_FILE_URL`, `FRONTEND_URL`, Paystack keys, webhook configuration, and mail.
 - **Automated checks:** smoke test after deploy: health, `subscription-plans` JSON, test checkout in **staging** with webhook replay.
-- **Plan configuration workflow:** admin UI already manages plans/gateways — ensure **every paid plan** has **`flutterwavePlanId`** and currency or checkout fails with 400 (already guarded in code).
+- **Plan configuration workflow:** ensure every paid plan has a Paystack plan code and currency, then verify changes with sandbox checkout.
 
 ### 4.2 Funnel instrumentation
 
@@ -125,9 +125,9 @@ Below is prioritized for **impact / effort** for a SMB invoicing SaaS.
 
 Not all are required for **first** MRR, but they accelerate **ARPU** and **retention**:
 
-- **Native payment links** on invoices (if not fully productized) — Paystack/Flutterwave **per-invoice** payment in addition to **platform subscription**.
+- **Native payment links** on invoices (if not fully productized) — Paystack **per-invoice** payment in addition to **platform subscription**.
 - **Accounting export** (CSV, PDF packs) — matches accountant workflows in target markets.
-- **Annual plans / add-ons** — second line of MRR if Flutterwave plans support it.
+- **Annual plans / add-ons** — second line of MRR if supported by the configured Paystack product.
 - **Team permissions** — `TenantStaff` model exists; productize **seats** as a tier.
 
 ### 4.5 Engineering cleanup that enables speed
@@ -145,13 +145,13 @@ Not all are required for **first** MRR, but they accelerate **ARPU** and **reten
 
 | Scenario | Timeline | Preconditions |
 |----------|----------|-----------------|
-| **Existing production + working Flutterwave** | **Days** | Keys, plan IDs, webhooks, landing `NEXT_PUBLIC_*` correct; sales/push traffic |
+| **Production + working Paystack checkout** | **Days** | Keys, plan codes, webhooks, landing `NEXT_PUBLIC_*` correct; sales/push traffic |
 | **Production flaky (schema, PDF, CORS, env)** | **2–6 weeks** to stabilize | Fix infra + parity + monitoring before scaling ad spend |
 | **New market / heavy outbound** | **1–3 months** to iterate | Requires funnel metrics, support capacity, localized pricing copy |
 
 ### 5.2 Revenue model in code today
 
-- **Primary:** **B2B SaaS subscriptions** (monthly via Flutterwave **payment_plan**).
+- **Primary:** **B2B SaaS subscriptions** (monthly via Paystack hosted checkout).
 - **Secondary (potential):** Referral incentives; future **usage-based** or **payment processing** revenue if invoice-level collection is productized and priced.
 
 **Bottom line:** The codebase supports **near-term MRR** assuming billing is configured and the app is reliable. **Fast scaling** of spend or headcount without fixing **measurement and uptime** wastes budget.
@@ -198,7 +198,7 @@ Not all are required for **first** MRR, but they accelerate **ARPU** and **reten
 
 Use this as a working task list for leadership and engineering.
 
-1. **Billing:** Verify Flutterwave **live** keys, **webhook** URL in dashboard, and **plan ID** for every paid tier; test full flow in production with a real small charge.
+1. **Billing:** Verify Paystack keys, webhook URL, and plan code for every paid tier; test the full flow in sandbox before production release.
 2. **URLs:** Align **all** post-payment redirects with actual frontend routes under static hosting.
 3. **Landing:** Set `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_APP_SIGNUP` in every deploy environment; test pricing page load.
 4. **Truth in advertising:** Update integrations page or ship MVP integrations.
@@ -217,7 +217,7 @@ Use this as a working task list for leadership and engineering.
 | Static export | `ClickInvoiceFrontend/next.config.ts` (`output: "export"`) |
 | API entry | `ClickInvoiceApi/routes/api.php`, `routes/api2.php` (duplicate surface — confirm which is canonical in prod) |
 | Subscribe | `POST /subscribe/{planId}` (JWT + tenant middleware group) |
-| Webhook | `POST /flutterwave/webhook` |
+| Webhook | `POST /api/paystack/webhook` |
 | Plans (public) | `GET /subscription-plans` |
 | Landing pricing | `ClickInvoiceLandingPage/app/pricing/page.tsx` |
 | SEO site URL | `ClickInvoiceLandingPage/lib/seo/constants.ts` (`SITE_URL`) |
