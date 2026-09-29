@@ -17,6 +17,8 @@ jobs:
   test:
     name: Test API
     runs-on: ubuntu-latest
+    env:
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - name: Check out source
         uses: actions/checkout@v4
