@@ -4,18 +4,19 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\PlansController;
 use App\Http\Controllers\SubscriptionController;
+use App\Jobs\SendBroadcastEmail;
 use App\Models\Currency;
 use App\Models\Plans;
 use App\Models\Role;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\PaystackClient;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Mail;
-use App\Mail\UserNotificationMail;
+use Illuminate\Support\Facades\Bus;
 use Tests\TestCase;
 
 class BillingAdminAuthorizationTest extends TestCase
@@ -123,7 +124,7 @@ class BillingAdminAuthorizationTest extends TestCase
         $superAdminRole = Role::create(['roleName' => 'SUPER_ADMIN']);
         $this->user->update(['role' => $superAdminRole->roleId]);
         Auth::setUser($this->user->fresh());
-        Mail::fake();
+        Bus::fake();
         $startDate = now()->startOfDay();
         $expectedExpiryDate = $startDate->copy()->addMonthsNoOverflow(2)->toDateString();
 
@@ -137,7 +138,7 @@ class BillingAdminAuthorizationTest extends TestCase
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
-        $this->assertTrue($response->getData(true)['emailSent']);
+        $this->assertSame('queued', $response->getData(true)['emailStatus']);
         $this->assertSame($plan->planId, $recipient->fresh()->currentPlan);
 
         $subscription = Subscription::where('userId', $recipient->id)->firstOrFail();
@@ -148,10 +149,15 @@ class BillingAdminAuthorizationTest extends TestCase
         $this->assertSame('complimentary_award', $subscription->metadata['payment_channel']);
         $this->assertTrue($subscription->metadata['complimentary_award']);
 
-        Mail::assertSent(UserNotificationMail::class, function (UserNotificationMail $mail) use ($recipient) {
-            return $mail->hasTo($recipient->email)
-                && $mail->subjectLine === 'You have been awarded a ClickInvoice subscription'
-                && str_contains($mail->messageBody, 'Professional subscription has been awarded');
+        Bus::assertBatched(function ($batch) use ($recipient, $expectedExpiryDate) {
+            $job = $batch->jobs->first();
+
+            return $batch->jobs->count() === 1
+                && $job instanceof SendBroadcastEmail
+                && $job->user->is($recipient)
+                && $job->subject === 'You have been awarded a ClickInvoice subscription'
+                && str_contains($job->message, 'Professional subscription has been awarded')
+                && str_contains($job->message, Carbon::parse($expectedExpiryDate)->format('F j, Y'));
         });
     }
 
@@ -180,7 +186,7 @@ class BillingAdminAuthorizationTest extends TestCase
             'nextBillingDate' => now()->addDays(5),
             'endDate' => now()->addDays(5),
         ]);
-        Mail::fake();
+        Bus::fake();
 
         $response = app(SubscriptionController::class)->assignManual(Request::create('/assign', 'POST', [
             'userId' => $this->user->id,
@@ -194,7 +200,7 @@ class BillingAdminAuthorizationTest extends TestCase
         $this->assertSame('active', $activeSubscription->fresh()->status);
         $this->assertSame('SUB_existing', $activeSubscription->fresh()->providerSubscriptionId);
         $this->assertSame(1, Subscription::where('userId', $this->user->id)->count());
-        Mail::assertNothingSent();
+        Bus::assertNothingBatched();
         Http::assertNothingSent();
     }
 }

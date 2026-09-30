@@ -6,14 +6,14 @@ use App\Models\Plans;
 use App\Models\Subscription;
 use App\Models\Payment;
 use App\Models\User; // Assuming auth
+use App\Jobs\SendBroadcastEmail;
 use App\Services\PaystackClient;
 use App\Services\PaystackSubscriptionService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
-use App\Mail\UserNotificationMail;
 
 class SubscriptionController extends Controller
 {
@@ -522,24 +522,28 @@ public function activate(Request $request, $subscriptionId)
             return $newSub;
         });
 
-        $emailSent = null;
+        $emailStatus = null;
         if ($isComplimentary) {
-            $emailSent = false;
-            if ($user->email) {
-                $expiryLabel = $subscription->endDate?->format('F j, Y') ?? 'until further notice';
-                $messageBody = "Your {$plan->planName} subscription has been awarded to you at no cost.\n\n"
-                    . "Your access is active now and is scheduled through {$expiryLabel}. No payment was collected for this award.\n\n"
-                    . 'We look forward to helping your business grow with ClickInvoice.';
-
+            if (!$user->email) {
+                $emailStatus = 'no_email';
+            } else {
                 try {
-                    Mail::to($user->email)->send(new UserNotificationMail(
-                        user: $user,
-                        subjectLine: 'You have been awarded a ClickInvoice subscription',
-                        messageBody: $messageBody
-                    ));
-                    $emailSent = true;
+                    $expiryLabel = $subscription->endDate?->format('F j, Y') ?? 'until further notice';
+                    $messageBody = "Your {$plan->planName} subscription has been awarded to you at no cost.\n\n"
+                        . "Your access is active now and is scheduled through {$expiryLabel}. No payment was collected for this award.\n\n"
+                        . 'We look forward to helping your business grow with ClickInvoice.';
+
+                    Bus::batch([
+                        new SendBroadcastEmail(
+                            user: $user,
+                            subject: 'You have been awarded a ClickInvoice subscription',
+                            message: $messageBody
+                        ),
+                    ])->dispatch();
+                    $emailStatus = 'queued';
                 } catch (\Throwable $exception) {
-                    Log::warning('Complimentary subscription award email failed', [
+                    $emailStatus = 'queue_failed';
+                    Log::warning('Complimentary subscription award email could not be queued', [
                         'subscription_id' => $subscription->subscriptionId,
                         'user_id' => $user->id,
                         'error' => $exception->getMessage(),
@@ -550,9 +554,13 @@ public function activate(Request $request, $subscriptionId)
 
         return response()->json([
             'message' => $isComplimentary
-                ? ($emailSent ? 'Complimentary subscription awarded and email sent.' : 'Complimentary subscription awarded, but the email could not be sent.')
+                ? match ($emailStatus) {
+                    'queued' => 'Complimentary subscription awarded. The email has been queued for delivery.',
+                    'no_email' => 'Complimentary subscription awarded, but the user account has no email address.',
+                    default => 'Complimentary subscription awarded, but the email could not be queued.',
+                }
                 : 'Manual subscription assigned successfully',
-            'emailSent' => $emailSent,
+            'emailStatus' => $emailStatus,
             'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
         ], 201);
     }
