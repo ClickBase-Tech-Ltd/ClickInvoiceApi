@@ -66,3 +66,52 @@ For ClickInvoice production, the live Paystack plans should match:
 - `PREMIUM = ₦13,300.00` with `PLN_8i0rr7771fvtnym`
 
 Check the job from **GitHub → Actions → Deploy ClickInvoice API** and confirm the workflow completes before treating the site as live.
+
+
+cd /Applications/ClickInvoice/ClickInvoiceApi
+
+git status
+git add .
+git commit -m "Update backend before production deploy"
+git push origin main
+
+
+OR
+
+cd /Applications/ClickInvoice/ClickInvoiceApi && git add . && git commit -m "Update backend before production deploy" && git push origin main
+
+# If Git asks for your username/password
+
+git remote -v
+git remote set-url origin git@github.com:ClickBase-Tech-Ltd/ClickInvoiceApi.git
+
+git push origin main
+
+# DEPLOY FROM GITHUB TO LIVE SERVER
+
+ssh -i ~/.ssh/clickinvoice_api_deploy_20260929 root@168.231.114.123
+
+cd /var/www/ClickInvoiceApi
+git pull origin main
+composer install --no-interaction --prefer-dist --no-dev
+php artisan migrate --force
+php artisan config:cache
+php artisan route:cache
+php artisan optimize
+systemctl reload nginx
+systemctl reload php8.2-fpm
+
+
+# If you want a single deploy command
+
+ssh -i ~/.ssh/clickinvoice_api_deploy_20260929 root@168.231.114.123 "
+cd /var/www/ClickInvoiceApi &&
+git pull origin main &&
+composer install --no-interaction --prefer-dist --no-dev &&
+php artisan migrate --force &&
+php artisan config:cache &&
+php artisan route:cache &&
+php artisan optimize &&
+systemctl reload nginx &&
+systemctl reload php8.2-fpm
+"

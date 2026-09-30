@@ -11,7 +11,9 @@ use App\Services\PaystackSubscriptionService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use App\Mail\UserNotificationMail;
 
 class SubscriptionController extends Controller
 {
@@ -425,29 +427,60 @@ public function activate(Request $request, $subscriptionId)
             return response()->json(['message' => 'Billing administrator access is required.'], 403);
         }
 
+        if ($request->boolean('complimentary') && !$this->isSuperAdmin()) {
+            return response()->json(['message' => 'Only a super administrator can award complimentary subscriptions.'], 403);
+        }
+
         $validated = $request->validate([
             'userId' => 'required|integer|exists:users,id',
             'planId' => 'required|integer|exists:plans,planId',
             'status' => 'nullable|in:active,pending',
+            'complimentary' => 'nullable|boolean',
             'startDate' => 'nullable|date',
             'nextBillingDate' => 'nullable|date',
             'expiryDate' => 'nullable|date',
+            'durationMonths' => 'nullable|integer|min:1|max:24',
             'amountPaid' => 'nullable|numeric|min:0',
             'paymentChannel' => 'nullable|string|max:100',
             'paymentReference' => 'nullable|string|max:255',
             'evidenceUrl' => 'nullable|url|max:500',
-            'reason' => 'nullable|string|max:1000',
+            'reason' => $request->boolean('complimentary') ? 'required|string|max:1000' : 'nullable|string|max:1000',
         ]);
 
-        $status = $validated['status'] ?? 'active';
+        $isComplimentary = (bool) ($validated['complimentary'] ?? false);
+        if ($isComplimentary && ($validated['status'] ?? 'active') !== 'active') {
+            return response()->json(['message' => 'Complimentary subscriptions must be activated immediately.'], 422);
+        }
+
+        $status = $isComplimentary ? 'active' : ($validated['status'] ?? 'active');
 
         $user = User::findOrFail($validated['userId']);
         $plan = Plans::with('currency_detail')->where('planId', $validated['planId'])->firstOrFail();
 
+        if ($isComplimentary && Subscription::query()
+            ->where('userId', $user->id)
+            ->where('status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('startDate')->orWhere('startDate', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('endDate')->orWhere('endDate', '>', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', now());
+            })
+            ->exists()) {
+            return response()->json([
+                'message' => 'This user already has an active subscription. Awarding a new free subscription here could replace their existing plan without safely postponing provider billing.',
+            ], 409);
+        }
+
         $start = isset($validated['startDate']) ? Carbon::parse($validated['startDate']) : Carbon::now();
         $nextBilling = isset($validated['nextBillingDate'])
             ? Carbon::parse($validated['nextBillingDate'])
-            : (clone $start)->addMonth();
+            : ($isComplimentary && isset($validated['expiryDate'])
+                ? Carbon::parse($validated['expiryDate'])
+                : (clone $start)->addMonthsNoOverflow($isComplimentary ? (int) ($validated['durationMonths'] ?? 1) : 1));
         $expiry = isset($validated['expiryDate'])
             ? Carbon::parse($validated['expiryDate'])
             : $nextBilling;
@@ -458,11 +491,12 @@ public function activate(Request $request, $subscriptionId)
             'manual_activation' => true,
             'assigned_by_admin_id' => $adminId,
             'assigned_at' => Carbon::now()->toDateTimeString(),
-            'payment_channel' => $validated['paymentChannel'] ?? null,
+            'payment_channel' => $isComplimentary ? 'complimentary_award' : ($validated['paymentChannel'] ?? null),
             'payment_reference' => $validated['paymentReference'] ?? null,
-            'amount_paid' => $validated['amountPaid'] ?? null,
+            'amount_paid' => $isComplimentary ? 0 : ($validated['amountPaid'] ?? null),
             'evidence_url' => $validated['evidenceUrl'] ?? null,
             'reason' => $validated['reason'] ?? null,
+            'complimentary_award' => $isComplimentary,
         ];
 
         $subscription = DB::transaction(function () use ($user, $plan, $status, $start, $nextBilling, $expiry, $metadata) {
@@ -488,8 +522,37 @@ public function activate(Request $request, $subscriptionId)
             return $newSub;
         });
 
+        $emailSent = null;
+        if ($isComplimentary) {
+            $emailSent = false;
+            if ($user->email) {
+                $expiryLabel = $subscription->endDate?->format('F j, Y') ?? 'until further notice';
+                $messageBody = "Your {$plan->planName} subscription has been awarded to you at no cost.\n\n"
+                    . "Your access is active now and is scheduled through {$expiryLabel}. No payment was collected for this award.\n\n"
+                    . 'We look forward to helping your business grow with ClickInvoice.';
+
+                try {
+                    Mail::to($user->email)->send(new UserNotificationMail(
+                        user: $user,
+                        subjectLine: 'You have been awarded a ClickInvoice subscription',
+                        messageBody: $messageBody
+                    ));
+                    $emailSent = true;
+                } catch (\Throwable $exception) {
+                    Log::warning('Complimentary subscription award email failed', [
+                        'subscription_id' => $subscription->subscriptionId,
+                        'user_id' => $user->id,
+                        'error' => $exception->getMessage(),
+                    ]);
+                }
+            }
+        }
+
         return response()->json([
-            'message' => 'Manual subscription assigned successfully',
+            'message' => $isComplimentary
+                ? ($emailSent ? 'Complimentary subscription awarded and email sent.' : 'Complimentary subscription awarded, but the email could not be sent.')
+                : 'Manual subscription assigned successfully',
+            'emailSent' => $emailSent,
             'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
         ], 201);
     }
@@ -558,5 +621,12 @@ public function activate(Request $request, $subscriptionId)
         $role = strtoupper(trim((string) auth()->user()?->user_role?->roleName));
 
         return in_array($role, ['ADMIN', 'SUPER_ADMIN', 'SUPERADMIN'], true);
+    }
+
+    private function isSuperAdmin(): bool
+    {
+        $role = strtoupper(trim((string) auth()->user()?->user_role?->roleName));
+
+        return in_array($role, ['SUPER_ADMIN', 'SUPERADMIN'], true);
     }
 }

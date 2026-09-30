@@ -136,8 +136,8 @@
                 </div>
 
                 <div class="btn-container">
-                    <a href="https://app.clickinvoice.app/signin/" class="btn">
-                        Go to ClickInvoice
+                    <a href="{{ $actionUrl ?? 'https://app.clickinvoice.app/signin/' }}" class="btn">
+                        {{ $actionText ?? 'Go to ClickInvoice' }}
                     </a>
                 </div>
             </td>

@@ -17,8 +17,13 @@ class UserNotificationMail extends Mailable
     public $subjectLine;
     public $messageBody;
 
-    public function __construct(User $user, string $subjectLine, string $messageBody)
-    {
+    public function __construct(
+        User $user,
+        string $subjectLine,
+        string $messageBody,
+        public string $actionText = 'Go to ClickInvoice',
+        public ?string $actionUrl = null
+    ) {
         $this->user = $user;
         $this->subjectLine = $subjectLine;
         $this->messageBody = $messageBody;
@@ -37,7 +42,10 @@ class UserNotificationMail extends Mailable
             markdown: 'emails.user-notification',
             with: [
                 'user' => $this->user,
+                'subjectLine' => $this->subjectLine,
                 'messageBody' => $this->messageBody,
+                'actionText' => $this->actionText,
+                'actionUrl' => $this->actionUrl,
             ]
         );
     }
