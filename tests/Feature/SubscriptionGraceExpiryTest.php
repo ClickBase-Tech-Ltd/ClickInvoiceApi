@@ -122,6 +122,39 @@ class SubscriptionGraceExpiryTest extends TestCase
         $this->assertSame((int) $alternatePlan->planId, (int) $this->user->fresh()->currentPlan);
     }
 
+    public function test_sync_honors_admin_access_extension_after_provider_billing_date(): void
+    {
+        $billingDate = now()->subDay();
+        $accessThrough = now()->addMonth();
+        $subscription = Subscription::create([
+            'userId' => $this->user->id,
+            'planId' => $this->paidPlan->planId,
+            'provider' => 'paystack',
+            'providerSubscriptionId' => 'SUB_admin_extension',
+            'status' => 'active',
+            'startDate' => now()->subMonths(2),
+            'nextBillingDate' => $billingDate,
+            'endDate' => $billingDate,
+            'metadata' => [
+                'admin_access_extension_until' => $accessThrough->toDateTimeString(),
+                'admin_access_extensions' => [[
+                    'months' => 1,
+                    'reason' => 'Service interruption goodwill credit',
+                ]],
+            ],
+        ]);
+
+        app(SyncSubscriptions::class)->handle(app(PaystackClient::class));
+
+        $fresh = $subscription->fresh();
+        $this->assertSame('active', $fresh->status);
+        $this->assertSame($billingDate->toDateTimeString(), $fresh->nextBillingDate->toDateTimeString());
+        $this->assertTrue($fresh->hasAccessAt(now()));
+        $this->assertTrue($this->user->fresh()->canCreateInvoice());
+        $this->assertSame((int) $this->paidPlan->planId, (int) $this->user->fresh()->currentPlan);
+        Http::assertNothingSent();
+    }
+
     public function test_grace_expiry_disables_provider_subscription_and_keeps_email_token_encrypted(): void
     {
         Http::fake([

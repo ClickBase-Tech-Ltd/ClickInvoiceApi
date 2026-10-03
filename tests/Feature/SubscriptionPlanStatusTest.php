@@ -9,6 +9,7 @@ use App\Models\Plans;
 use App\Models\Role;
 use App\Models\Subscription;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -128,5 +129,51 @@ class SubscriptionPlanStatusTest extends TestCase
         $this->assertSame('past_due', $plans[$paidPlan->planId]['subscription_status']);
         $this->assertTrue($plans[$paidPlan->planId]['is_subscribed']);
         $this->assertFalse($plans[$freePlan->planId]['is_subscribed']);
+    }
+
+    public function test_plan_catalog_keeps_subscription_current_through_admin_access_extension(): void
+    {
+        $this->withoutMiddleware([VerifyJwtToken::class, IdentifyTenant::class]);
+        $role = Role::create(['roleName' => 'USER']);
+        $currency = Currency::create([
+            'currencyName' => 'Nigerian Naira',
+            'currencyCode' => 'NGN',
+            'currencySymbol' => 'N',
+            'country' => 'Nigeria',
+        ]);
+        $paidPlan = Plans::create([
+            'planName' => 'Basic',
+            'price' => 6600,
+            'currency' => $currency->currencyId,
+        ]);
+        $user = User::create([
+            'firstName' => 'Extended',
+            'lastName' => 'Customer',
+            'email' => 'extended-customer@example.test',
+            'phoneNumber' => '+10000000002',
+            'password' => 'test-password',
+            'role' => $role->roleId,
+            'currentPlan' => $paidPlan->planId,
+        ]);
+        $accessThrough = now()->addMonth()->startOfSecond();
+        Subscription::create([
+            'userId' => $user->id,
+            'planId' => $paidPlan->planId,
+            'provider' => 'paystack',
+            'providerSubscriptionId' => 'SUB_extended_plan_status',
+            'status' => 'active',
+            'startDate' => now()->subMonth(),
+            'nextBillingDate' => now()->subDay(),
+            'endDate' => now()->subDay(),
+            'metadata' => ['admin_access_extension_until' => $accessThrough->toDateTimeString()],
+        ]);
+
+        $response = $this->actingAs($user, 'web')->getJson('/api/plans');
+        $response->assertOk();
+        $paidPlanStatus = collect($response->json())->keyBy('planId')->get($paidPlan->planId);
+
+        $this->assertSame('active', $paidPlanStatus['subscription_status']);
+        $this->assertTrue($paidPlanStatus['is_subscribed']);
+        $this->assertSame($accessThrough->toIso8601String(), Carbon::parse($paidPlanStatus['subscription_ends_at'])->toIso8601String());
     }
 }

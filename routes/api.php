@@ -145,19 +145,7 @@ Route::middleware(['auth.jwt'])->group(function () {
             ->map(function ($plan) use ($userSubscriptions, $now) {
                 $history = $userSubscriptions->get($plan->planId, collect());
                 $latestSubscription = $history->first();
-                $currentSubscription = $history->first(function ($subscription) use ($now) {
-                    if ($subscription->startDate && $subscription->startDate > $now) {
-                        return false;
-                    }
-
-                    if ($subscription->status === 'past_due') {
-                        return $subscription->endDate && $subscription->endDate > $now;
-                    }
-
-                    return $subscription->status === 'active'
-                        && (!$subscription->endDate || $subscription->endDate > $now)
-                        && (!$subscription->nextBillingDate || $subscription->nextBillingDate > $now);
-                });
+                $currentSubscription = $history->first(fn ($subscription) => $subscription->hasAccessAt($now));
                 $displaySubscription = $currentSubscription ?? $latestSubscription;
                 $status = $displaySubscription?->status;
 
@@ -170,8 +158,7 @@ Route::middleware(['auth.jwt'])->group(function () {
 
                 $plan->is_subscribed = (bool) $currentSubscription;
                 $plan->subscription_status = $status;
-                $plan->subscription_ends_at = $displaySubscription?->endDate
-                    ?? $displaySubscription?->nextBillingDate;
+                $plan->subscription_ends_at = $displaySubscription?->accessThroughDate();
                 $plan->subscription_id = $displaySubscription?->subscriptionId;
 
                 return $plan;
@@ -367,6 +354,8 @@ Route::middleware(['auth.jwt', 'tenant'])->group(function () {
     Route::patch('/subscriptions/{subscriptionId}/deactivate', [SubscriptionController::class, 'deactivate']);
     Route::patch('/subscriptions/{subscriptionId}/expire', [SubscriptionController::class, 'expire']);
     Route::post('/subscriptions/assign-manual', [SubscriptionController::class, 'assignManual']);
+    Route::post('/subscriptions/{subscriptionId}/extend-period', [SubscriptionController::class, 'extendPeriod']);
+    Route::post('/subscriptions/{subscriptionId}/retry-extension-email', [SubscriptionController::class, 'retryExtensionEmail']);
     Route::patch('/subscriptions/bulk-action', [SubscriptionController::class, 'bulkAction']);
 
     Route::get('/users/{id}/profile', [UsersController::class, 'profile']);

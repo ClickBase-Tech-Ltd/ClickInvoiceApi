@@ -17,28 +17,12 @@ class SyncSubscriptions extends Command
     {
         $now = Carbon::now();
 
-        // 1️⃣ Expire local subscriptions that have passed explicit endDate
-        // or have reached their nextBillingDate when endDate is missing.
+        // Evaluate dates through the shared entitlement predicate so admin-granted
+        // extensions are not expired by the provider billing date.
         $expired = Subscription::whereIn('status', ['active', 'past_due'])
-            ->where(function ($q) use ($now) {
-                $q->where(function ($active) use ($now) {
-                    $active->where('status', 'active')
-                        ->where(function ($dates) use ($now) {
-                            $dates->where(function ($endDate) use ($now) {
-                                $endDate->whereNotNull('endDate')->where('endDate', '<=', $now);
-                            })->orWhere(function ($nextBilling) use ($now) {
-                                $nextBilling->whereNull('endDate')
-                                    ->whereNotNull('nextBillingDate')
-                                    ->where('nextBillingDate', '<=', $now);
-                            });
-                        });
-                })->orWhere(function ($grace) use ($now) {
-                    $grace->where('status', 'past_due')
-                        ->whereNotNull('endDate')
-                        ->where('endDate', '<=', $now);
-                });
-            })
-            ->get();
+            ->with('user')
+            ->get()
+            ->filter(fn (Subscription $subscription) => !$subscription->hasAccessAt($now));
 
         foreach ($expired as $subscription) {
             $subscription->status = 'expired';
@@ -49,32 +33,15 @@ class SyncSubscriptions extends Command
                 $hasAnotherEntitledSubscription = Subscription::query()
                     ->where('userId', $user->id)
                     ->where('subscriptionId', '!=', $subscription->subscriptionId)
-                    ->where(function ($query) use ($now) {
-                        $query->where(function ($active) use ($now) {
-                            $active->where('status', 'active')
-                                ->where(function ($dates) use ($now) {
-                                    $dates->whereNull('startDate')->orWhere('startDate', '<=', $now);
-                                })
-                                ->where(function ($dates) use ($now) {
-                                    $dates->whereNull('endDate')->orWhere('endDate', '>', $now);
-                                })
-                                ->where(function ($dates) use ($now) {
-                                    $dates->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', $now);
-                                });
-                        })->orWhere(function ($grace) use ($now) {
-                            $grace->where('status', 'past_due')
-                                ->whereNotNull('endDate')
-                                ->where('endDate', '>', $now);
-                        });
-                    })
-                    ->exists();
+                    ->whereIn('status', ['active', 'past_due'])
+                    ->get()
+                    ->contains(fn (Subscription $other) => $other->hasAccessAt($now));
 
                 if (!$hasAnotherEntitledSubscription) {
                     $user->update(['currentPlan' => 1]);
                 }
             }
 
-            // $this->info("Expired subscription ID: {$subscription->subscriptionId}");
             Log::channel('daily')->info("Expired subscription ID: {$subscription->subscriptionId}");
         }
 
@@ -110,7 +77,5 @@ class SyncSubscriptions extends Command
         }
 
         Log::channel('daily')->info("Subscription sync completed.");
-}
-
-
+    }
 }

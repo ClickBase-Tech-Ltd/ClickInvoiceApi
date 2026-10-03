@@ -178,20 +178,13 @@ public function canCreateTenant(): bool
             $query->whereNull('startDate')
                 ->orWhere('startDate', '<=', $now);
         })
-        ->where(function ($query) use ($now) {
-            $query->whereNull('endDate')
-                ->orWhere('endDate', '>', $now);
-        })
-        ->where(function ($query) use ($now) {
-            $query->whereNull('nextBillingDate')
-                ->orWhere('nextBillingDate', '>', $now);
-        })
         ->whereHas('plan', function ($query) {
             $query->where('planId', '>', 1);
         })
         ->with('plan')
         ->latest('subscriptionId')
-        ->first();
+        ->get()
+        ->first(fn (Subscription $subscription) => $subscription->hasAccessAt($now));
 
     $plan = $activePaidSubscription?->plan;
     if (!$plan && (int) $this->currentPlan <= 1) {

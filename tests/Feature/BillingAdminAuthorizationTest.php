@@ -4,19 +4,20 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\PlansController;
 use App\Http\Controllers\SubscriptionController;
-use App\Jobs\SendBroadcastEmail;
+use App\Mail\UserNotificationMail;
 use App\Models\Currency;
 use App\Models\Plans;
 use App\Models\Role;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\PaystackClient;
+use App\Services\SubscriptionEmailOutboxDelivery;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class BillingAdminAuthorizationTest extends TestCase
@@ -55,6 +56,7 @@ class BillingAdminAuthorizationTest extends TestCase
         $this->assertSame(403, $subscriptions->deactivate(Request::create('/deactivate', 'PATCH'), 1)->getStatusCode());
         $this->assertSame(403, $subscriptions->expire(Request::create('/expire', 'PATCH'), 1)->getStatusCode());
         $this->assertSame(403, $subscriptions->assignManual(Request::create('/assign', 'POST'))->getStatusCode());
+        $this->assertSame(403, $subscriptions->extendPeriod(Request::create('/extend', 'POST'), 1, app(SubscriptionEmailOutboxDelivery::class))->getStatusCode());
         $this->assertSame(403, $subscriptions->bulkAction(Request::create('/bulk-action', 'PATCH'))->getStatusCode());
 
         Http::assertNothingSent();
@@ -124,7 +126,7 @@ class BillingAdminAuthorizationTest extends TestCase
         $superAdminRole = Role::create(['roleName' => 'SUPER_ADMIN']);
         $this->user->update(['role' => $superAdminRole->roleId]);
         Auth::setUser($this->user->fresh());
-        Bus::fake();
+        Mail::fake();
         $startDate = now()->startOfDay();
         $expectedExpiryDate = $startDate->copy()->addMonthsNoOverflow(2)->toDateString();
 
@@ -138,7 +140,7 @@ class BillingAdminAuthorizationTest extends TestCase
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
-        $this->assertSame('queued', $response->getData(true)['emailStatus']);
+        $this->assertSame('sent', $response->getData(true)['emailStatus']);
         $this->assertSame($plan->planId, $recipient->fresh()->currentPlan);
 
         $subscription = Subscription::where('userId', $recipient->id)->firstOrFail();
@@ -149,15 +151,11 @@ class BillingAdminAuthorizationTest extends TestCase
         $this->assertSame('complimentary_award', $subscription->metadata['payment_channel']);
         $this->assertTrue($subscription->metadata['complimentary_award']);
 
-        Bus::assertBatched(function ($batch) use ($recipient, $expectedExpiryDate) {
-            $job = $batch->jobs->first();
-
-            return $batch->jobs->count() === 1
-                && $job instanceof SendBroadcastEmail
-                && $job->user->is($recipient)
-                && $job->subject === 'You have been awarded a ClickInvoice subscription'
-                && str_contains($job->message, 'Professional subscription has been awarded')
-                && str_contains($job->message, Carbon::parse($expectedExpiryDate)->format('F j, Y'));
+        Mail::assertSent(UserNotificationMail::class, function (UserNotificationMail $mail) use ($recipient, $expectedExpiryDate) {
+            return $mail->hasTo($recipient->email)
+                && $mail->subjectLine === 'You have been awarded a ClickInvoice subscription'
+                && str_contains($mail->messageBody, 'Professional subscription has been awarded')
+                && str_contains($mail->messageBody, Carbon::parse($expectedExpiryDate)->format('F j, Y'));
         });
     }
 
@@ -186,7 +184,7 @@ class BillingAdminAuthorizationTest extends TestCase
             'nextBillingDate' => now()->addDays(5),
             'endDate' => now()->addDays(5),
         ]);
-        Bus::fake();
+        Mail::fake();
 
         $response = app(SubscriptionController::class)->assignManual(Request::create('/assign', 'POST', [
             'userId' => $this->user->id,
@@ -200,7 +198,152 @@ class BillingAdminAuthorizationTest extends TestCase
         $this->assertSame('active', $activeSubscription->fresh()->status);
         $this->assertSame('SUB_existing', $activeSubscription->fresh()->providerSubscriptionId);
         $this->assertSame(1, Subscription::where('userId', $this->user->id)->count());
-        Bus::assertNothingBatched();
+        Mail::assertNothingSent();
         Http::assertNothingSent();
     }
+
+    public function test_manual_assignment_never_cancels_an_existing_active_subscription(): void
+    {
+        $currency = Currency::create([
+            'currencyName' => 'Test Naira',
+            'currencyCode' => 'NGN',
+            'currencySymbol' => 'N',
+            'country' => 'Testland',
+        ]);
+        $plan = Plans::create([
+            'planName' => 'Professional',
+            'price' => 2500,
+            'currency' => $currency->currencyId,
+        ]);
+        $this->user->update(['role' => Role::create(['roleName' => 'ADMIN'])->roleId]);
+        Auth::setUser($this->user->fresh());
+        $activeSubscription = Subscription::create([
+            'userId' => $this->user->id,
+            'planId' => $plan->planId,
+            'provider' => 'paystack',
+            'providerSubscriptionId' => 'SUB_keep_active',
+            'status' => 'active',
+            'startDate' => now()->subMonth(),
+            'nextBillingDate' => now()->addDays(5),
+            'endDate' => now()->addDays(5),
+        ]);
+
+        $response = app(SubscriptionController::class)->assignManual(Request::create('/assign', 'POST', [
+            'userId' => $this->user->id,
+            'planId' => $plan->planId,
+            'status' => 'active',
+            'reason' => 'Manual assignment must not replace existing access',
+        ]));
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame('active', $activeSubscription->fresh()->status);
+        $this->assertSame('SUB_keep_active', $activeSubscription->fresh()->providerSubscriptionId);
+        $this->assertSame(1, Subscription::where('userId', $this->user->id)->count());
+    }
+
+    public function test_admin_extends_access_without_changing_provider_billing_and_emails_user(): void
+    {
+        $currency = Currency::create([
+            'currencyName' => 'Test Naira',
+            'currencyCode' => 'NGN',
+            'currencySymbol' => 'N',
+            'country' => 'Testland',
+        ]);
+        $plan = Plans::create([
+            'planName' => 'Professional',
+            'price' => 2500,
+            'currency' => $currency->currencyId,
+        ]);
+        $admin = Role::create(['roleName' => 'ADMIN']);
+        $this->user->update(['role' => $admin->roleId]);
+        Auth::setUser($this->user->fresh());
+        $billingDate = now()->addDays(5)->startOfSecond();
+        $subscription = Subscription::create([
+            'userId' => $this->user->id,
+            'planId' => $plan->planId,
+            'provider' => 'paystack',
+            'providerSubscriptionId' => 'SUB_extend_test',
+            'status' => 'active',
+            'startDate' => now()->subMonth(),
+            'nextBillingDate' => $billingDate,
+            'endDate' => $billingDate,
+        ]);
+        Mail::fake();
+
+        $response = app(SubscriptionController::class)->extendPeriod(Request::create('/extend', 'POST', [
+            'months' => 2,
+            'reason' => 'Service interruption goodwill credit',
+        ]), $subscription->subscriptionId, app(SubscriptionEmailOutboxDelivery::class));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $fresh = $subscription->fresh();
+        $extendedThrough = $billingDate->copy()->addMonthsNoOverflow(2);
+        $this->assertSame('active', $fresh->status);
+        $this->assertSame('SUB_extend_test', $fresh->providerSubscriptionId);
+        $this->assertSame($billingDate->toDateTimeString(), $fresh->nextBillingDate->toDateTimeString());
+        $this->assertSame($extendedThrough->toDateTimeString(), $fresh->accessExtensionUntil()->toDateTimeString());
+        $this->assertTrue($fresh->hasAccessAt($billingDate->copy()->addMonth()));
+        $this->assertSame('Service interruption goodwill credit', $fresh->metadata['admin_access_extensions'][0]['reason']);
+        $this->assertSame($this->user->id, $fresh->metadata['admin_access_extensions'][0]['granted_by_admin_id']);
+
+        Mail::assertSent(UserNotificationMail::class, fn (UserNotificationMail $mail) =>
+            $mail->hasTo($this->user->email)
+                && $mail->subjectLine === 'Your ClickInvoice subscription access has been extended'
+                && str_contains($mail->messageBody, 'extended by 2 month(s)')
+                && str_contains($mail->messageBody, 'does not change your Paystack billing schedule')
+        );
+    }
+
+    public function test_super_admin_extends_access_without_changing_paystack_billing_date_and_emails_user(): void
+    {
+        $currency = Currency::create([
+            'currencyName' => 'Test Naira',
+            'currencyCode' => 'NGN',
+            'currencySymbol' => 'N',
+            'country' => 'Testland',
+        ]);
+        $plan = Plans::create([
+            'planName' => 'Professional',
+            'price' => 2500,
+            'currency' => $currency->currencyId,
+        ]);
+        $this->user->update(['role' => Role::create(['roleName' => 'SUPER_ADMIN'])->roleId]);
+        Auth::setUser($this->user->fresh());
+        $billingDate = now()->addDays(5)->startOfMinute();
+        $subscription = Subscription::create([
+            'userId' => $this->user->id,
+            'planId' => $plan->planId,
+            'provider' => 'paystack',
+            'providerSubscriptionId' => 'SUB_extend_test',
+            'status' => 'active',
+            'startDate' => now()->subMonth(),
+            'nextBillingDate' => $billingDate,
+            'endDate' => $billingDate,
+        ]);
+        Mail::fake();
+
+        $response = app(SubscriptionController::class)->extendPeriod(Request::create('/extend', 'POST', [
+            'months' => 2,
+            'reason' => 'Service interruption goodwill credit',
+        ]), $subscription->subscriptionId, app(SubscriptionEmailOutboxDelivery::class));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('active', $subscription->fresh()->status);
+        $this->assertTrue($subscription->fresh()->nextBillingDate->equalTo($billingDate));
+        $this->assertSame('SUB_extend_test', $subscription->fresh()->providerSubscriptionId);
+
+        $extendedThrough = $billingDate->copy()->addMonthsNoOverflow(2);
+        $this->assertTrue($subscription->fresh()->accessExtensionUntil()->equalTo($extendedThrough));
+        $this->assertTrue($subscription->fresh()->hasAccessAt($billingDate->copy()->addMonth()));
+        $this->assertSame('Service interruption goodwill credit', $subscription->fresh()->metadata['admin_access_extensions'][0]['reason']);
+        $this->assertSame($this->user->id, $subscription->fresh()->metadata['admin_access_extensions'][0]['granted_by_admin_id']);
+
+        Mail::assertSent(UserNotificationMail::class, fn (UserNotificationMail $mail) =>
+            $mail->hasTo($this->user->email)
+                && $mail->subjectLine === 'Your ClickInvoice subscription access has been extended'
+                && str_contains($mail->messageBody, 'extended by 2 month(s)')
+                && str_contains($mail->messageBody, 'does not change your Paystack billing schedule')
+        );
+    }
+
 }

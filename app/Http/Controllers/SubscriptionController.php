@@ -4,15 +4,17 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Plans;
 use App\Models\Subscription;
+use App\Models\SubscriptionEmailOutbox;
 use App\Models\Payment;
 use App\Models\User; // Assuming auth
-use App\Jobs\SendBroadcastEmail;
+use App\Mail\UserNotificationMail;
 use App\Services\PaystackClient;
 use App\Services\PaystackSubscriptionService;
+use App\Services\SubscriptionEmailOutboxDelivery;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class SubscriptionController extends Controller
@@ -457,24 +459,6 @@ public function activate(Request $request, $subscriptionId)
         $user = User::findOrFail($validated['userId']);
         $plan = Plans::with('currency_detail')->where('planId', $validated['planId'])->firstOrFail();
 
-        if ($isComplimentary && Subscription::query()
-            ->where('userId', $user->id)
-            ->where('status', 'active')
-            ->where(function ($query) {
-                $query->whereNull('startDate')->orWhere('startDate', '<=', now());
-            })
-            ->where(function ($query) {
-                $query->whereNull('endDate')->orWhere('endDate', '>', now());
-            })
-            ->where(function ($query) {
-                $query->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', now());
-            })
-            ->exists()) {
-            return response()->json([
-                'message' => 'This user already has an active subscription. Awarding a new free subscription here could replace their existing plan without safely postponing provider billing.',
-            ], 409);
-        }
-
         $start = isset($validated['startDate']) ? Carbon::parse($validated['startDate']) : Carbon::now();
         $nextBilling = isset($validated['nextBillingDate'])
             ? Carbon::parse($validated['nextBillingDate'])
@@ -500,12 +484,26 @@ public function activate(Request $request, $subscriptionId)
         ];
 
         $subscription = DB::transaction(function () use ($user, $plan, $status, $start, $nextBilling, $expiry, $metadata) {
-            Subscription::where('userId', $user->id)
+            User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
+
+            $hasCurrentSubscription = Subscription::query()
+                ->where('userId', $user->id)
                 ->where('status', 'active')
-                ->update([
-                    'status' => 'cancelled',
-                    'endDate' => Carbon::now(),
-                ]);
+                ->where(function ($query) {
+                    $query->whereNull('startDate')->orWhere('startDate', '<=', now());
+                })
+                ->where(function ($query) {
+                    $query->whereNull('endDate')->orWhere('endDate', '>', now());
+                })
+                ->where(function ($query) {
+                    $query->whereNull('nextBillingDate')->orWhere('nextBillingDate', '>', now());
+                })
+                ->lockForUpdate()
+                ->exists();
+
+            if ($hasCurrentSubscription) {
+                return null;
+            }
 
             $newSub = Subscription::create([
                 'userId' => $user->id,
@@ -522,6 +520,12 @@ public function activate(Request $request, $subscriptionId)
             return $newSub;
         });
 
+        if (!$subscription) {
+            return response()->json([
+                'message' => 'This user already has an active subscription. Their existing plan was left unchanged.',
+            ], 409);
+        }
+
         $emailStatus = null;
         if ($isComplimentary) {
             if (!$user->email) {
@@ -533,17 +537,15 @@ public function activate(Request $request, $subscriptionId)
                         . "Your access is active now and is scheduled through {$expiryLabel}. No payment was collected for this award.\n\n"
                         . 'We look forward to helping your business grow with ClickInvoice.';
 
-                    Bus::batch([
-                        new SendBroadcastEmail(
+                    Mail::to($user->email)->send(new UserNotificationMail(
                             user: $user,
-                            subject: 'You have been awarded a ClickInvoice subscription',
-                            message: $messageBody
-                        ),
-                    ])->dispatch();
-                    $emailStatus = 'queued';
+                            subjectLine: 'You have been awarded a ClickInvoice subscription',
+                            messageBody: $messageBody
+                        ));
+                    $emailStatus = 'sent';
                 } catch (\Throwable $exception) {
-                    $emailStatus = 'queue_failed';
-                    Log::warning('Complimentary subscription award email could not be queued', [
+                    $emailStatus = 'failed';
+                    Log::error('Complimentary subscription award email failed', [
                         'subscription_id' => $subscription->subscriptionId,
                         'user_id' => $user->id,
                         'error' => $exception->getMessage(),
@@ -555,14 +557,149 @@ public function activate(Request $request, $subscriptionId)
         return response()->json([
             'message' => $isComplimentary
                 ? match ($emailStatus) {
-                    'queued' => 'Complimentary subscription awarded. The email has been queued for delivery.',
+                    'sent' => 'Complimentary subscription awarded and email sent successfully.',
                     'no_email' => 'Complimentary subscription awarded, but the user account has no email address.',
-                    default => 'Complimentary subscription awarded, but the email could not be queued.',
+                    default => 'Complimentary subscription awarded, but the email could not be sent. Please retry or contact support.',
                 }
                 : 'Manual subscription assigned successfully',
             'emailStatus' => $emailStatus,
             'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
         ], 201);
+    }
+
+    public function extendPeriod(Request $request, $subscriptionId, SubscriptionEmailOutboxDelivery $emailDelivery)
+    {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
+        $validated = $request->validate([
+            'months' => 'required|integer|min:1|max:24',
+            'reason' => 'required|string|max:1000',
+        ]);
+
+        $result = DB::transaction(function () use ($subscriptionId, $validated) {
+            $subscription = Subscription::query()
+                ->with(['user', 'plan'])
+                ->lockForUpdate()
+                ->find($subscriptionId);
+
+            if (!$subscription) {
+                return ['error' => 'Subscription not found.', 'status' => 404];
+            }
+
+            if ($subscription->status !== 'active' || !$subscription->hasAccessAt()) {
+                return ['error' => 'Only a currently active subscription can be extended.', 'status' => 409];
+            }
+
+            if (!filter_var($subscription->user?->email, FILTER_VALIDATE_EMAIL)) {
+                return ['error' => 'The user needs a valid email address before access can be extended.', 'status' => 422];
+            }
+
+            $currentAccessThrough = $subscription->accessThroughDate();
+            if (!$currentAccessThrough || !$currentAccessThrough->isFuture()) {
+                return ['error' => 'This subscription has no future access period to extend.', 'status' => 409];
+            }
+
+            $now = Carbon::now();
+            $extendedThrough = $currentAccessThrough->copy()->addMonthsNoOverflow((int) $validated['months']);
+            $metadata = is_array($subscription->metadata) ? $subscription->metadata : [];
+            $extensions = is_array($metadata['admin_access_extensions'] ?? null)
+                ? $metadata['admin_access_extensions']
+                : [];
+            $extensions[] = [
+                'months' => (int) $validated['months'],
+                'previous_access_through' => $currentAccessThrough->toDateTimeString(),
+                'access_through' => $extendedThrough->toDateTimeString(),
+                'reason' => $validated['reason'],
+                'granted_by_admin_id' => auth()->id(),
+                'granted_at' => $now->toDateTimeString(),
+            ];
+            $metadata['admin_access_extension_until'] = $extendedThrough->toDateTimeString();
+            $metadata['admin_access_extensions'] = $extensions;
+
+            $subscription->update(['metadata' => $metadata]);
+
+            $messageBody = "Your {$subscription->plan?->planName} subscription access has been extended by {$validated['months']} month(s).\n\n"
+                . "Your ClickInvoice access is now available through {$extendedThrough->format('F j, Y')}.\n\n"
+                . 'This access extension does not change your Paystack billing schedule.';
+
+            $outboxMessage = SubscriptionEmailOutbox::create([
+                'subscription_id' => $subscription->subscriptionId,
+                'user_id' => $subscription->userId,
+                'recipient_email' => $subscription->user->email,
+                'subject' => 'Your ClickInvoice subscription access has been extended',
+                'message_body' => $messageBody,
+                'action_text' => 'View billing details',
+                'action_url' => rtrim((string) config('clickinvoice.app_url'), '/') . '/dashboard/my-subscriptions/',
+                'status' => 'pending',
+                'attempts' => 0,
+                'next_attempt_at' => now(),
+            ]);
+
+            return [
+                'subscription' => $subscription->fresh(['user', 'plan.currency_detail']),
+                'previousAccessThrough' => $currentAccessThrough,
+                'extendedThrough' => $extendedThrough,
+                'months' => (int) $validated['months'],
+                'outboxId' => $outboxMessage->id,
+            ];
+        });
+
+        if (isset($result['error'])) {
+            return response()->json(['message' => $result['error']], $result['status']);
+        }
+
+        $subscription = $result['subscription'];
+        $emailStatus = $emailDelivery->deliver((int) $result['outboxId']);
+        if ($emailStatus === 'not_pending') {
+            $emailStatus = 'pending';
+        }
+
+        return response()->json([
+            'message' => match ($emailStatus) {
+                'sent' => 'Subscription access extended and confirmation email sent.',
+                    'failed' => 'Subscription access was extended. Email delivery failed temporarily and will be retried automatically.',
+                default => 'Subscription access was extended. Confirmation email is pending delivery and will be retried automatically.',
+            },
+            'emailStatus' => $emailStatus,
+            'subscription' => $subscription,
+            'previousAccessThrough' => $result['previousAccessThrough']->toIso8601String(),
+            'accessThrough' => $result['extendedThrough']->toIso8601String(),
+        ], $emailStatus === 'sent' ? 200 : 202);
+    }
+
+    public function retryExtensionEmail(Request $request, $subscriptionId, SubscriptionEmailOutboxDelivery $emailDelivery)
+    {
+        if (!$this->isBillingAdmin()) {
+            return response()->json(['message' => 'Billing administrator access is required.'], 403);
+        }
+
+        $message = SubscriptionEmailOutbox::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('status', 'failed')
+            ->latest('id')
+            ->first();
+
+        if (!$message) {
+            return response()->json(['message' => 'No failed access-extension email is available to retry.'], 404);
+        }
+
+        $message->update([
+            'status' => 'pending',
+            'attempts' => 0,
+            'next_attempt_at' => now(),
+            'last_error' => null,
+        ]);
+
+        $emailStatus = $emailDelivery->deliver((int) $message->id);
+
+        return response()->json([
+            'message' => $emailStatus === 'sent'
+                ? 'Extension confirmation email sent successfully.'
+                : 'Extension confirmation email is pending automatic retry.',
+            'emailStatus' => $emailStatus === 'not_pending' ? 'pending' : $emailStatus,
+        ], $emailStatus === 'sent' ? 200 : 202);
     }
 
     public function bulkAction(Request $request)
